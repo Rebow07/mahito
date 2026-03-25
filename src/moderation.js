@@ -147,6 +147,8 @@ async function handleModeration(sock, msg) {
 
   const groupName = await getGroupName(sock, groupJid)
   const userNumber = jidToNumber(userJid)
+  const pushName = msg.pushName || 'Sem Nome'
+  const userDisplay = `@${userNumber} (${pushName})`
   const maxPenalties = groupConfig.max_penalties || 3
 
   // ─── Spam Detection ───
@@ -160,7 +162,7 @@ async function handleModeration(sock, msg) {
 
     const count = addStrikeDB(userJid, groupJid)
     await sendStrikeWarning(sock, groupJid, userJid, count, maxPenalties, 'spam')
-    await sendDiscordLog(`⚠️ **SPAM DETECTADO**\n👤 Número: ${userNumber}\n👥 Grupo: ${groupName}\n📊 Strikes: ${count}/${maxPenalties}`, globalConfig)
+    await sendDiscordLog(`⚠️ **SPAM DETECTADO**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}\n📊 Strikes: ${count}/${maxPenalties}`, globalConfig)
 
     if (count >= maxPenalties) {
       await safeRemove(sock, groupJid, userJid)
@@ -170,7 +172,7 @@ async function handleModeration(sock, msg) {
         mentions: [userJid]
       }, {}, 800, true)
       await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
-      await sendDiscordLog(`🚫 **BAN POR SPAM**\n👤 Número: ${userNumber}\n👥 Grupo: ${groupName}`, globalConfig)
+      await sendDiscordLog(`🚫 **BAN POR SPAM**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}`, globalConfig)
     }
     return
   }
@@ -194,7 +196,7 @@ async function handleModeration(sock, msg) {
       mentions: [userJid]
     }, {}, 800, true)
     await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
-    await sendDiscordLog(`🚫 **BAN IMEDIATO**\n👤 Número: ${userNumber}\n👥 Grupo: ${groupName}\n📌 Motivo: ${instantReason}`, globalConfig)
+    await sendDiscordLog(`🚫 **BAN IMEDIATO**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}\n📌 Motivo: ${instantReason}`, globalConfig)
     return
   }
 
@@ -215,7 +217,7 @@ async function handleModeration(sock, msg) {
   const reason = allLight ? 'link_leve' : 'link'
 
   await sendStrikeWarning(sock, groupJid, userJid, count, maxPenalties, reason)
-  await sendDiscordLog(`⚠️ **STRIKE**\n👤 Número: ${userNumber}\n👥 Grupo: ${groupName}\n📌 Motivo: ${reason}\n📊 Strikes: ${count}/${maxPenalties}`, globalConfig)
+  await sendDiscordLog(`⚠️ **STRIKE**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}\n📌 Motivo: ${reason}\n📊 Strikes: ${count}/${maxPenalties}`, globalConfig)
 
   if (count >= maxPenalties) {
     await safeRemove(sock, groupJid, userJid)
@@ -225,7 +227,7 @@ async function handleModeration(sock, msg) {
       mentions: [userJid]
     }, {}, 800, true)
     await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
-    await sendDiscordLog(`🚫 **BAN POR ACÚMULO**\n👤 Número: ${userNumber}\n👥 Grupo: ${groupName}\n📌 ${reason}\n📊 Strikes: ${count}/${maxPenalties}`, globalConfig)
+    await sendDiscordLog(`🚫 **BAN POR ACÚMULO**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}\n📌 ${reason}\n📊 Strikes: ${count}/${maxPenalties}`, globalConfig)
   }
 }
 
