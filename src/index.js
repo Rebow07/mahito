@@ -45,9 +45,29 @@ function rememberRecentMessage(msg, text) {
 
 async function connect() {
   ensureFiles()
+  console.clear()
 
-  // Initialize SQLite and migrate old JSON data
-  initTables()
+  const mahitoAscii = `
+\x1b[32m
+     ███╗   ███╗ █████╗ ██╗  ██╗██╗████████╗ ██████╗ 
+     ████╗ ████║██╔══██╗██║  ██║██║╚══██╔══╝██╔═══██╗
+     ██╔████╔██║███████║███████║██║   ██║   ██║   ██║
+     ██║╚██╔╝██║██╔══██║██╔══██║██║   ██║   ██║   ██║
+     ██║ ╚═╝ ██║██║  ██║██║  ██║██║   ██║   ╚██████╔╝
+     ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝   ╚═╝    ╚═════╝ 
+\x1b[0m
+\x1b[36m             [ BEM-VINDO AO MAHITO SYSTEM ]\x1b[0m
+`
+  console.log(mahitoAscii)
+  
+  process.stdout.write('\x1b[32m⏳ Inicializando componentes: [\x1b[0m')
+  for (let i = 0; i < 25; i++) {
+    process.stdout.write('\x1b[32m█\x1b[0m')
+    await sleep(40)
+  }
+  process.stdout.write('\x1b[32m] 100% Completo!\x1b[0m\n\n')
+
+  logLocal('=== Iniciando Mahito Bot ===')
   try { migrateFromJSON() } catch (err) { logLocal(`Migração JSON: ${err.message}`) }
 
   const config = loadConfig()
@@ -166,16 +186,19 @@ async function connect() {
     const senderJid = getBaseJid(senderRaw)
     const currentConfig = loadConfig()
 
-    if (!remoteJid || !text) return
+    if (!remoteJid) return
 
     if (!remoteJid.endsWith('@g.us')) {
       if (isOwner(senderJid, currentConfig)) {
         await processOwnerPrivate(sock, senderJid, text, msg)
       } else {
+        if (!text) return
         await processCustomerPrivate(sock, senderJid, text)
       }
       return
     }
+
+    if (!text) return
 
     // ─── XP System ───
     const permLevel = getPermLevel(senderJid, remoteJid)
