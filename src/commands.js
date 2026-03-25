@@ -511,13 +511,20 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
 
   // ─── !ranking ───
   if (cmd === '!ranking' || cmd === '!top') {
-    const top = getGroupRanking(groupJid, 10)
+    let top = getGroupRanking(groupJid, 15)
+    // Filtra o próprio bot do ranking e pega os 10 primeiros reais
+    const botJid = getBaseJid(sock.user.id)
+    top = top.filter(u => getBaseJid(u.user_id) !== botJid).slice(0, 10)
+
     if (!top.length) { await safeSendMessage(sock, groupJid, { text: 'Nenhum ranking ainda.' }); return true }
+    
     const lines = top.map((u, i) => {
       const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`
-      return `${medal} ${jidToNumber(u.user_id)} — XP: ${u.xp} | Nível: ${u.level}`
+      return `${medal} @${jidToNumber(u.user_id)} — XP: ${u.xp} | Nível: ${u.level}`
     }).join('\n')
-    await safeSendMessage(sock, groupJid, { text: `🏆 *Ranking do Grupo*\n\n${lines}` })
+    
+    const mentions = top.map(u => getBaseJid(u.user_id))
+    await safeSendMessage(sock, groupJid, { text: `🏆 *Ranking do Grupo*\n\n${lines}`, mentions })
     return true
   }
 
