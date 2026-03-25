@@ -10,7 +10,7 @@ const qrcode = require('qrcode-terminal')
 
 const { PATHS, state } = require('./state')
 const { ensureFiles } = require('./database')
-const { initTables, migrateFromJSON, addXP, getPermLevel, XP_PER_LEVEL } = require('./db')
+const { initTables, migrateFromJSON, addXP, getPermLevel, XP_PER_LEVEL, upsertChatKey } = require('./db')
 const { loadConfig, isOwner } = require('./config')
 const { logLocal, getText, getBaseJid, sleep, jidToNumber } = require('./utils')
 const { safeSendMessage } = require('./queue')
@@ -133,10 +133,21 @@ async function connect() {
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     const msg = messages?.[0]
-    if (!msg || !msg.message || msg.key.fromMe) return
+    if (!msg || !msg.message) return
 
     const remoteJid = msg.key.remoteJid
     const text = getText(msg.message)
+
+    if (remoteJid && msg.key.id) {
+      upsertChatKey(
+        remoteJid,
+        msg.key.id,
+        msg.key.fromMe,
+        msg.messageTimestamp ? (typeof msg.messageTimestamp === 'number' ? msg.messageTimestamp * 1000 : Number(msg.messageTimestamp) * 1000) : Date.now()
+      )
+    }
+
+    if (msg.key.fromMe) return
 
     // Always cache group messages
     if (remoteJid && text) {

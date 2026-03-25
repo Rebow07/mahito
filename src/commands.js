@@ -79,6 +79,8 @@ function ownerPrivateMenu(config) {
     `foto perfil  → envie imagem\n` +
     `mahito teste → figurinha\n\n` +
     `⚙️ *Sistema*\n` +
+    `apagar conversas → deleta todos os DMs (exceto Dono)\n` +
+    `limpar conversas → limpa as msgs de todos os Chats e Grupos\n` +
     `reiniciar → reinicia o bot\n` +
     `atualizar → git pull + restart\n\n` +
     `━━━━━━━━━━━━━━━━━━`
@@ -169,6 +171,46 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       delete state.customerStates[jid].setProfilePhoto
       await safeSendMessage(sock, jid, { text: `❌ Erro: ${err.message}` })
     }
+    return
+  }
+
+  if (msg === 'apagar conversas' || msg === '#apagar conversas') {
+    const { getAllChatKeys } = require('./db')
+    const keys = getAllChatKeys()
+    let count = 0
+    await safeSendMessage(sock, jid, { text: '⏳ Apagando DMs do WhatsApp...' })
+    for (const k of keys) {
+      if (k.jid.includes('@g.us')) continue // Pula grupos
+      if (k.jid === jid || config.ownerNumbers.includes(jidToNumber(k.jid))) continue // Pula os donos
+      try {
+        await sock.chatModify({
+          delete: true,
+          lastMessages: [{ key: { remoteJid: k.jid, id: k.msg_id, fromMe: Boolean(k.from_me) }, messageTimestamp: Math.floor(k.timestamp / 1000) }]
+        }, k.jid)
+        count++
+        await sleep(300)
+      } catch (err) { logLocal(`Erro apagar ${k.jid}: ${err.message}`) }
+    }
+    await safeSendMessage(sock, jid, { text: `✅ ${count} DMs apagados com sucesso.` })
+    return
+  }
+
+  if (msg === 'limpar conversas' || msg === '#limparconversas' || msg === 'limparconversas') {
+    const { getAllChatKeys } = require('./db')
+    const keys = getAllChatKeys()
+    let count = 0
+    await safeSendMessage(sock, jid, { text: '⏳ Limpando histórico de todas as conversas e grupos...' })
+    for (const k of keys) {
+      try {
+        await sock.chatModify({
+          clear: true,
+          lastMessages: [{ key: { remoteJid: k.jid, id: k.msg_id, fromMe: Boolean(k.from_me) }, messageTimestamp: Math.floor(k.timestamp / 1000) }]
+        }, k.jid)
+        count++
+        await sleep(300)
+      } catch (err) { logLocal(`Erro limpar ${k.jid}: ${err.message}`) }
+    }
+    await safeSendMessage(sock, jid, { text: `✅ Histórico de ${count} conversas/grupos limpo.` })
     return
   }
 

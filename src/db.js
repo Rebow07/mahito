@@ -69,6 +69,13 @@ function initTables() {
       message TEXT NOT NULL,
       enabled INTEGER DEFAULT 1
     );
+
+    CREATE TABLE IF NOT EXISTS chat_history_keys (
+      jid TEXT PRIMARY KEY,
+      msg_id TEXT,
+      from_me INTEGER,
+      timestamp INTEGER
+    );
   `)
 
   try {
@@ -278,6 +285,18 @@ function migrateFromJSON() {
   } catch {}
 }
 
+// ─── Chat History Keys ───
+
+function upsertChatKey(jid, msg_id, from_me, timestamp) {
+  const d = getDB()
+  d.prepare('INSERT OR REPLACE INTO chat_history_keys (jid, msg_id, from_me, timestamp) VALUES (?, ?, ?, ?)').run(jid, msg_id, from_me ? 1 : 0, timestamp)
+}
+
+function getAllChatKeys() {
+  const d = getDB()
+  return d.prepare('SELECT * FROM chat_history_keys').all()
+}
+
 module.exports = {
   getDB,
   initTables,
@@ -304,5 +323,7 @@ module.exports = {
   removeSchedule,
   migrateFromJSON,
   XP_PER_MESSAGE,
-  XP_PER_LEVEL
+  XP_PER_LEVEL,
+  upsertChatKey,
+  getAllChatKeys
 }
