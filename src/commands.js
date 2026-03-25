@@ -60,7 +60,8 @@ function ownerPrivateMenu(config) {
     `grupo rm 123@g.us\n` +
     `grupo list\n\n` +
     `💬 *Mensagens*\n` +
-    `dm 5511999999999 Olá!\n` +
+    `dm           → privado passo-a-passo\n` +
+    `dm 5511... msg → atalho direto\n` +
     `comunicado   → assistente global\n\n` +
     `🚫 *Proteção*\n` +
     `banword add texto\n` +
@@ -261,6 +262,42 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
   if (msg === 'comunicado') {
     state.customerStates[jid] = { ...(state.customerStates[jid] || {}), flow: 'comunicado_text' }
     await safeSendMessage(sock, jid, { text: '📝 O que você deseja enviar no comunicado?' })
+    return
+  }
+
+  if (sc.flow === 'dm_number') {
+    const rawNumber = onlyDigits(msgObj?.message?.conversation || msgObj?.message?.extendedTextMessage?.text || raw)
+    if (!rawNumber || rawNumber.length < 10) {
+      await safeSendMessage(sock, jid, { text: '❌ Número inválido. Operação cancelada.' })
+      delete state.customerStates[jid].flow
+      return
+    }
+    state.customerStates[jid].dmTarget = `${rawNumber}@s.whatsapp.net`
+    state.customerStates[jid].flow = 'dm_text'
+    await safeSendMessage(sock, jid, { text: `📱 Destino: @${rawNumber}\n\n📝 Agora digite a mensagem que deseja enviar (ou "0" para cancelar):` })
+    return
+  }
+
+  if (sc.flow === 'dm_text') {
+    const textToSend = msgObj?.message?.conversation || msgObj?.message?.extendedTextMessage?.text || raw
+    if (textToSend === '0' || textToSend.toLowerCase() === 'cancelar') {
+      await safeSendMessage(sock, jid, { text: '❌ Envio cancelado.' })
+    } else {
+      try {
+        await safeSendMessage(sock, state.customerStates[jid].dmTarget, { text: textToSend })
+        await safeSendMessage(sock, jid, { text: `✅ Mensagem despachada com sucesso pro privado!` })
+      } catch (err) {
+        await safeSendMessage(sock, jid, { text: `❌ Erro ao enviar: ${err.message}` })
+      }
+    }
+    delete state.customerStates[jid].flow
+    delete state.customerStates[jid].dmTarget
+    return
+  }
+  
+  if (msg === 'dm' || msg === 'privado') {
+    state.customerStates[jid] = { ...(state.customerStates[jid] || {}), flow: 'dm_number' }
+    await safeSendMessage(sock, jid, { text: '👤 Para qual número você quer enviar a mensagem?\n(Ex: 5511999999999)' })
     return
   }
 
