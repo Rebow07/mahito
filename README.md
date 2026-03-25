@@ -26,7 +26,12 @@ Mahito Ã© um bot focado em moderaÃ§Ã£o, ranking, whitelist, blacklist, ant
 
 ### [25/03/2026] - v3.1.4
 - **Dashboard de Grupo Ultra-Geral:** Expansão massiva com controles de XP, Mensagens de Saída customizadas e Gestão de Admins/Permissões diretamente pelo menu.
-- **Reset de Permissões:** Opção de limpar todos os cargos (VIP/MOD) de um grupo específico.
+### [25/03/2026] - v3.1.6
+- **Controle de Shutdown (Bot OFF):** Adicionada opção 5 no menu de "Sistema" para desligar o bot com segurança via WhatsApp.
+- **Modo Silêncio (Fechar Grupo):** 
+  - Novo comando `!fadm` ou `!fechar` para trancar o grupo apenas para administradores.
+  - Comando `!abrir` para liberar o chat para os membros.
+  - Opção 15 no Dashboard de Grupo para alternar o estado do grupo (Aberto/Fechado) de forma interativa.
 
 ---
 

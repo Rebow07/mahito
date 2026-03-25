@@ -81,7 +81,8 @@ async function renderGroupDashboard(sock, groupJid) {
     `1️⃣1️⃣ Sistema de XP: *[${gc.xp_enabled ? 'ON' : 'OFF'}]*\n` +
     `1️⃣2️⃣ Mensagem de Saída: *[${gc.leave_enabled ? 'ON' : 'OFF'}]*\n` +
     `1️⃣3️⃣ Mudar Texto de Saída\n` +
-    `1️⃣4️⃣ Gerenciar Permissões (VIPs/Mod)\n\n` +
+    `1️⃣4️⃣ Gerenciar Permissões (VIPs/Mod)\n` +
+    `1️⃣5️⃣ Fechar/Abrir Grupo (Só Admins)\n\n` +
     `0️⃣ Voltar`
   )
 }
@@ -283,7 +284,7 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     }
     if (msg === '8') {
       state.customerStates[jid].flow = 'menu_sys'
-      await safeSendMessage(sock, jid, { text: `*Sistema*\n\n1️⃣ Reiniciar Bot\n2️⃣ Atualizar do GitHub\n3️⃣ Apagar meus DMs (Mantém grupos)\n4️⃣ Limpar Mensagens de Tudo\n0️⃣ Voltar` })
+      await safeSendMessage(sock, jid, { text: `*Sistema*\n\n1️⃣ Reiniciar Bot\n2️⃣ Atualizar do GitHub\n3️⃣ Apagar meus DMs (Mantém grupos)\n4️⃣ Limpar Mensagens de Tudo\n5️⃣ DESLIGAR BOT (Shutdown)\n0️⃣ Voltar` })
       return
     }
   }
@@ -419,6 +420,17 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       const text = `👥 *Permissões do Grupo*\n\n${lines.join('\n') || 'Nenhum Mod/VIP cadastrado.'}\n\n1️⃣ Promover/Rebaixar Membro\n2️⃣ Remover Todas as Permissões\n0️⃣ Voltar`
       await safeSendMessage(sock, jid, { text, mentions: mods.map(u => u.user_id) })
       return
+    }
+    if (msg === '15') {
+       try {
+         const meta = await getGroupMeta(sock, targetJid)
+         const isAnnounce = meta?.announce
+         await sock.groupSettingUpdate(targetJid, isAnnounce ? 'not_announcement' : 'announcement')
+         await safeSendMessage(sock, jid, { text: `✅ Grupo ${isAnnounce ? 'ABERTO' : 'FECHADO'} para membros.` })
+       } catch (err) {
+         await safeSendMessage(sock, jid, { text: `❌ Erro: O bot precisa ser Admin do grupo.` })
+       }
+       return
     }
   }
 
@@ -651,6 +663,11 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       state.customerStates[jid].flow = 'owner_menu'
       return processOwnerPrivate(sock, jid, 'limpar conversas', msgObj)
     }
+    if (msg === '5') {
+      await safeSendMessage(sock, jid, { text: '⏻ Desligando sistema Mahito...' })
+      await sleep(1000)
+      process.exit(0)
+    }
     if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
   }
 
@@ -824,10 +841,34 @@ async function processCustomerPrivate(sock, jid, text) {
 // ─── Group Commands ───
 
 async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, isBotOwner) {
+  const parts = text.trim().split(' ')
+  const commandText = parts[0] ? parts[0].toLowerCase() : ''
+  const cmd = commandText
   const config = loadConfig()
-  const commandText = text.trim()
-  const parts = commandText.split(/\s+/)
-  const cmd = normalize(parts[0])
+
+  // ─── !fadm (Fechar Grupo) ───
+  if (cmd === '!fadm' || cmd === '!fechar') {
+    if (!admin && !isBotOwner) return true
+    try {
+      await sock.groupSettingUpdate(groupJid, 'announcement')
+      await safeSendMessage(sock, groupJid, { text: '🔒 Grupo fechado. Apenas administradores podem enviar mensagens.' })
+    } catch {
+      await safeSendMessage(sock, groupJid, { text: '❌ Erro: Certifique-se de que o bot é admin.' })
+    }
+    return true
+  }
+
+  // ─── !abrir (Abrir Grupo) ───
+  if (cmd === '!abrir') {
+    if (!admin && !isBotOwner) return true
+    try {
+      await sock.groupSettingUpdate(groupJid, 'not_announcement')
+      await safeSendMessage(sock, groupJid, { text: '🔓 Grupo aberto para todos os membros.' })
+    } catch {
+      await safeSendMessage(sock, groupJid, { text: '❌ Erro: Certifique-se de que o bot é admin.' })
+    }
+    return true
+  }
 
   const gc = getGroupConfig(groupJid)
   const isPrivileged = admin || isBotOwner || getPermLevel(userJid, groupJid) >= 1
