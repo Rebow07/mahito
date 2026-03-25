@@ -338,18 +338,12 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
   }
 
   if (msg === 'status') {
-    const whitelist = getWhitelist()
-    const groups = getAllowedGroups()
-    const schedules = getSchedules()
+    const { getTotalUsers } = require('./db')
     await safeSendMessage(sock, jid, {
       text:
-        `📊 *Status do Mahito*\n\n` +
-        `• Bot: ${config.phoneNumber}\n` +
-        `• Dono: ${config.ownerNumbers.join(', ')}\n` +
-        `• Whitelist: ${whitelist.length}\n` +
-        `• Grupos: ${groups.length || 'todos'}\n` +
-        `• Agendamentos: ${schedules.length}\n` +
-        `• 🗄️ Banco: SQLite ativo`
+        `🌑 真人 [ ᴍᴀʜɪᴛᴏ ᴍᴏᴅ ] 真人 🌑\n\n` +
+        `  🧬 Status: 𝑶𝒏𝒍𝒊𝒏𝒆\n\n` +
+        `  📊 Almas Processadas: [${getTotalUsers()}]`
     })
     return
   }
@@ -556,7 +550,17 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
 
   if (cmd === '!ping') { await safeSendMessage(sock, groupJid, { text: '🏓 Pong!' }); return true }
   if (cmd === '!regras') { await safeSendMessage(sock, groupJid, { text: config.rulesText || 'Sem regras.' }); return true }
-  if (cmd === '!status') { await safeSendMessage(sock, groupJid, { text: '✅ Mahito online. 🗄️ SQLite ativo.' }); return true }
+  if (cmd === '!status') {
+    const { getTotalUsers } = require('./db')
+    await safeSendMessage(sock, groupJid, {
+      text: 
+        `🌑 真人 [ ᴍᴀʜɪᴛᴏ ᴍᴏᴅ ] 真人 🌑\n\n` +
+        `  🧬 Status: 𝑶𝒏𝒍𝒊𝒏𝒆\n\n` +
+        `  📊 Almas Processadas: [${getTotalUsers()}]`
+    })
+    return true
+  }
+
   if (cmd === '!idgrupo') { await safeSendMessage(sock, groupJid, { text: `🆔 ${groupJid}` }); return true }
 
   // ─── !se apresentar ───

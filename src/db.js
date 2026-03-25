@@ -121,6 +121,11 @@ function getUserData(userId, groupId) {
   return row
 }
 
+function getTotalUsers() {
+  const d = getDB()
+  return d.prepare('SELECT COUNT(DISTINCT user_id) as c FROM users_data').get().c
+}
+
 function addStrikeDB(userId, groupId) {
   const d = getDB()
   d.prepare('INSERT OR IGNORE INTO users_data (user_id, group_id) VALUES (?, ?)').run(userId, groupId)
@@ -309,6 +314,7 @@ module.exports = {
   setPermLevel,
   addXP,
   getGroupRanking,
+  getTotalUsers,
   getBlacklist,
   addBlacklistItem,
   removeBlacklistItem,
