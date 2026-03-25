@@ -161,7 +161,11 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
         d.prepare('DELETE FROM chat_history_keys WHERE jid = ?').run(k.jid)
         count++
         await sleep(300)
-      } catch (err) { logLocal(`Erro apagar ${k.jid}: ${err.message}`) }
+      } catch (err) { 
+        logLocal(`Erro apagar ${k.jid}: ${err.message}`)
+        const d = require('./db').getDB()
+        d.prepare('DELETE FROM chat_history_keys WHERE jid = ?').run(k.jid)
+      }
     }
     await safeSendMessage(sock, jid, { text: `✅ ${count} DMs apagados com sucesso.` })
     return
@@ -182,7 +186,11 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
         d.prepare('DELETE FROM chat_history_keys WHERE jid = ?').run(k.jid)
         count++
         await sleep(300)
-      } catch (err) { logLocal(`Erro limpar ${k.jid}: ${err.message}`) }
+      } catch (err) { 
+        logLocal(`Erro limpar ${k.jid}: ${err.message}`)
+        const d = require('./db').getDB()
+        d.prepare('DELETE FROM chat_history_keys WHERE jid = ?').run(k.jid)
+      }
     }
     await safeSendMessage(sock, jid, { text: `✅ Histórico de ${count} conversas/grupos limpo.` })
     return
