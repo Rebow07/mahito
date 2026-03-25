@@ -1,0 +1,225 @@
+Passo a passo na Raspberry
+1. Ligar a Raspberry e entrar no sistema
+
+Entre com o usuário:
+
+mahito
+2. Abrir o terminal
+
+No desktop da Raspberry, abra o terminal.
+
+3. Atualizar o sistema
+
+Rode:
+
+sudo apt update && sudo apt upgrade -y
+4. Instalar Node.js e npm
+
+Rode:
+
+sudo apt install -y nodejs npm
+
+Depois confira:
+
+node -v
+npm -v
+5. Colocar o pendrive
+
+Espete o pendrive na Raspberry.
+
+Normalmente ele monta sozinho.
+Abra o gerenciador de arquivos e copie a pasta do projeto para:
+
+/home/mahito/
+
+Exemplo final:
+
+/home/mahito/wa-discord-moderador-final
+6. Entrar na pasta do projeto
+
+No terminal:
+
+cd /home/mahito/wa-discord-moderador-final
+
+Se o nome da pasta for outro, ajuste.
+
+7. Conferir se os arquivos estão lá
+
+Rode:
+
+ls
+
+Tem que aparecer algo como:
+
+index.js
+package.json
+config.json
+data
+logs
+stickers
+8. Instalar dependências
+
+Rode:
+
+npm install --legacy-peer-deps
+
+Esse comando é importante por causa do conflito do sharp.
+
+9. Conferir o config.json
+
+Abra o config:
+
+nano config.json
+
+Confere se está tudo certo, principalmente:
+
+ownerNumbers
+discordWebhookUrl
+contact
+rulesText
+
+Para salvar no nano:
+
+Ctrl + O
+Enter
+Ctrl + X
+10. Conferir a figurinha do Mahito
+
+Veja se existe:
+
+ls stickers
+
+Tem que ter:
+
+mahito.webp
+11. Rodar o bot pela primeira vez
+
+Rode:
+
+npm start
+No primeiro login:
+
+Vai aparecer um QR Code no terminal.
+
+No WhatsApp/Business:
+
+Configurações
+Dispositivos conectados
+Conectar dispositivo
+escaneia o QR
+
+Quando conectar, não apague a pasta session.
+
+Deixar iniciando sozinho quando ligar
+12. Instalar PM2
+
+Rode:
+
+sudo npm install -g pm2
+13. Iniciar o bot com PM2
+
+Ainda na pasta do projeto:
+
+pm2 start index.js --name mahito-bot
+14. Salvar a configuração do PM2
+
+Rode:
+
+pm2 save
+15. Ativar inicialização automática no boot
+
+Rode:
+
+pm2 startup
+
+Ele vai te devolver um comando grande.
+Copie e execute exatamente o comando que ele mostrar.
+
+Depois rode de novo:
+
+pm2 save
+16. Verificar se ficou certo
+
+Rode:
+
+pm2 list
+
+Tem que aparecer:
+
+mahito-bot
+
+com status online.
+
+Fazer o comando reboot funcionar pelo bot
+17. Liberar reboot sem senha
+
+Rode:
+
+sudo visudo
+
+Vai abrir um arquivo.
+
+Lá no final, adicione esta linha:
+
+mahito ALL=(ALL) NOPASSWD: /sbin/reboot
+
+Depois:
+
+salve
+saia
+
+No visudo, normalmente:
+
+Ctrl + O
+Enter
+Ctrl + X
+Testes finais
+18. Reiniciar o bot manualmente
+
+Rode:
+
+pm2 restart mahito-bot
+19. Ver logs
+
+Rode:
+
+pm2 logs mahito-bot
+20. Reiniciar a Raspberry para testar boot automático
+
+Rode:
+
+sudo reboot
+
+Quando a Raspberry voltar:
+
+o bot deve subir sozinho
+e mandar a mensagem pro dono:
+“Fala meu chefe, reiniciei e já subi tudo automático.”
+Resumo dos comandos principais
+Instalação
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y nodejs npm
+cd /home/mahito/wa-discord-moderador-final
+npm install --legacy-peer-deps
+npm start
+Produção com PM2
+sudo npm install -g pm2
+pm2 start index.js --name mahito-bot
+pm2 save
+pm2 startup
+pm2 save
+Verificação
+pm2 list
+pm2 logs mahito-bot
+Reinício
+sudo visudo
+
+Adicionar:
+
+mahito ALL=(ALL) NOPASSWD: /sbin/reboot
+Dicas importantes
+não apague a pasta session
+se mudar o projeto, copie a session junto
+mantenha config.json e stickers/mahito.webp no lugar
+se o bot não subir, primeiro veja:
+pm2 logs mahito-bot

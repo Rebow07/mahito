@@ -1,0 +1,1 @@
+Substitua os arquivos do projeto por estes. Adicione stickers/mahito.webp se quiser a figurinha do Mahito.
