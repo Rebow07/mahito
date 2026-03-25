@@ -211,7 +211,17 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
   if (lf === 'whitelist' && (ls === 'rm' || ls === 'remove')) { removeWhitelistDB(onlyDigits(tail)); await safeSendMessage(sock, jid, { text: `✅ ${tail} removido.` }); return }
   if (lf === 'grupo' && ls === 'add') { addAllowedGroupDB(tail); await safeSendMessage(sock, jid, { text: `✅ Grupo: ${tail}` }); return }
   if (lf === 'grupo' && (ls === 'rm' || ls === 'remove')) { removeAllowedGroupDB(tail); await safeSendMessage(sock, jid, { text: `✅ Grupo removido: ${tail}` }); return }
-  if (lf === 'grupo' && ls === 'list') { const g = getAllowedGroups(); await safeSendMessage(sock, jid, { text: g.length ? g.join('\n') : 'Nenhum.' }); return }
+  if (lf === 'grupo' && ls === 'list') {
+    const chats = await sock.groupFetchAllParticipating()
+    const botJid = getBaseJid(sock.user.id)
+    const lines = []
+    for (const [gJid, meta] of Object.entries(chats)) {
+      const isAdmin = meta.participants?.some(p => getBaseJid(p.id) === botJid && !!p.admin)
+      lines.push(`*${meta.subject || 'Grupo'}*\nID: ${gJid}\nStatus: ${isAdmin ? 'Admin ✅' : 'Membro ❌'}\n`)
+    }
+    await safeSendMessage(sock, jid, { text: lines.length ? `📊 *Meus Grupos*\n\n${lines.join('\n')}` : 'Nenhum grupo encontrado.' })
+    return
+  }
 
   if (lf === 'banword' && ls === 'add') { config.instantBanWords.push(tail); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Ban word: ${tail}` }); return }
   if (lf === 'banword' && (ls === 'rm' || ls === 'remove')) { config.instantBanWords = config.instantBanWords.filter(w => normalize(w) !== normalize(tail)); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Removida: ${tail}` }); return }
@@ -364,7 +374,16 @@ async function handleAdminGroupCommands(sock, msg, text, groupJid, userJid) {
   if (cmd === '!hierarquia') {
     const ranking = getGroupRanking(groupJid, 50)
     const levels = { 0: 'Membro', 1: 'VIP', 2: 'Mod', 3: 'Dono' }
-    const vips = ranking.filter(u => u.perm_level >= 1).sort((a, b) => b.perm_level - a.perm_level)
+    const vips = ranking.filter(u => u.perm_level >= 1)
+    
+    for (const num of config.ownerNumbers) {
+       const oJid = `${num}@s.whatsapp.net`
+       if (!vips.find(u => getBaseJid(u.user_id) === oJid)) {
+          vips.push({ user_id: oJid, perm_level: 3 })
+       }
+    }
+    vips.sort((a, b) => b.perm_level - a.perm_level)
+
     if (!vips.length) { await safeSendMessage(sock, groupJid, { text: 'Nenhum membro com permissão elevada.' }); return true }
     const lines = vips.map(u => `${levels[u.perm_level] || '?'} — ${jidToNumber(u.user_id)} (Nível ${u.perm_level})`).join('\n')
     await safeSendMessage(sock, groupJid, { text: `👑 *Hierarquia do Grupo*\n\n${lines}` })
@@ -408,6 +427,36 @@ async function handleAdminGroupCommands(sock, msg, text, groupJid, userJid) {
     const people = (meta?.participants || []).map(p => p.id).filter(Boolean)
     const textMsg = parts.slice(1).join(' ') || 'Atenção, pessoal!'
     await safeSendMessage(sock, groupJid, { text: textMsg, mentions: people }, {}, 3000)
+    return true
+  }
+
+  // ─── !enviar ───
+  if (cmd === '!enviar') {
+    const { isOwner } = require('./config')
+    if (!isOwner(userJid, config)) {
+       await safeSendMessage(sock, groupJid, { text: '❌ Apenas o Dono pode usar este comando.' })
+       return true
+    }
+    const targetJid = parts[1]
+    if (!targetJid || !targetJid.includes('@g.us')) {
+      await safeSendMessage(sock, groupJid, { text: 'Uso: !enviar ID_DO_GRUPO texto (ou respondendo a uma mensagem)' })
+      return true
+    }
+    
+    let textToSend = parts.slice(2).join(' ')
+    const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
+    if (quoted) {
+       const quotedText = getText({ message: quoted })
+       textToSend = textToSend ? `${textToSend}\n\n${quotedText}` : quotedText
+    }
+    
+    if (!textToSend) {
+       await safeSendMessage(sock, groupJid, { text: 'Mensagem vazia. Digite algo ou responda a uma mensagem.' })
+       return true
+    }
+    
+    await safeSendMessage(sock, targetJid, { text: textToSend })
+    await safeSendMessage(sock, groupJid, { text: `✅ Mensagem enviada para ${targetJid}` })
     return true
   }
 
