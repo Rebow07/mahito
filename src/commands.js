@@ -73,7 +73,8 @@ function ownerPrivateMenu(config) {
     `agenda rm ID\n\n` +
     `🎭 *Mahito*\n` +
     `foto perfil  → envie imagem\n` +
-    `mahito teste → figurinha\n\n` +
+    `mahito teste → figurinha\n` +
+    `comunicado   → assistente de envio\n\n` +
     `⚙️ *Sistema*\n` +
     `reiniciar → reinicia o bot\n` +
     `atualizar → git pull + restart\n\n` +
@@ -202,6 +203,65 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     return
   }
 
+  const sc = state.customerStates[jid] || {}
+
+  if (sc.flow === 'comunicado_text') {
+    state.customerStates[jid].comunicadoText = msgObj?.message?.conversation || msgObj?.message?.extendedTextMessage?.text || raw
+    state.customerStates[jid].flow = 'comunicado_group'
+    
+    const chats = await sock.groupFetchAllParticipating()
+    const options = []
+    state.customerStates[jid].comunicadoGroups = []
+    let i = 1
+    for (const [gJid, meta] of Object.entries(chats)) {
+      options.push(`${i}. ${meta.subject || 'Grupo'}`)
+      state.customerStates[jid].comunicadoGroups.push(gJid)
+      i++
+    }
+    
+    await safeSendMessage(sock, jid, { text: `📋 Escolha o grupo pelo número (digite 0 para cancelar):\n\n${options.join('\n')}` })
+    return
+  }
+
+  if (sc.flow === 'comunicado_group') {
+    const num = parseInt(msg)
+    const groups = state.customerStates[jid].comunicadoGroups || []
+    
+    if (num === 0) {
+      await safeSendMessage(sock, jid, { text: `❌ Comunicado cancelado.` })
+    } else if (!isNaN(num) && num > 0 && num <= groups.length) {
+      const targetJid = groups[num - 1]
+      let textToSend = state.customerStates[jid].comunicadoText
+      
+      // Auto-injetar '@todos' visível se a pessoa já não tiver colocado
+      if (!textToSend.toLowerCase().includes('@todos')) {
+         textToSend = `@todos\n\n${textToSend}`
+      }
+      
+      try {
+        const meta = await getGroupMeta(sock, targetJid)
+        const people = (meta?.participants || []).map(p => p.id).filter(Boolean)
+        await safeSendMessage(sock, targetJid, { text: textToSend, mentions: people }, {}, 3000)
+        await safeSendMessage(sock, jid, { text: `✅ Comunicado enviado para "${meta.subject}"!` })
+      } catch (err) {
+        await safeSendMessage(sock, jid, { text: `❌ Erro ao enviar: ${err.message}` })
+      }
+    } else {
+      await safeSendMessage(sock, jid, { text: `❌ Opção inválida. Operação cancelada.` })
+    }
+    
+    delete state.customerStates[jid].flow
+    delete state.customerStates[jid].comunicadoText
+    delete state.customerStates[jid].comunicadoGroups
+    return
+  }
+  
+  if (msg === 'comunicado') {
+    state.customerStates[jid] = { ...(state.customerStates[jid] || {}), flow: 'comunicado_text' }
+    await safeSendMessage(sock, jid, { text: '📝 O que você deseja enviar no comunicado?' })
+    return
+  }
+
   const [first, second, ...rest] = raw.split(' ')
   const lf = normalize(first)
   const ls = normalize(second)
@@ -283,13 +343,43 @@ async function processCustomerPrivate(sock, jid, text) {
   }
 }
 
-// ─── Group Admin Commands ───
+// ─── Group Commands ───
 
-async function handleAdminGroupCommands(sock, msg, text, groupJid, userJid) {
+async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, isBotOwner) {
   const config = loadConfig()
   const commandText = text.trim()
   const parts = commandText.split(/\s+/)
   const cmd = normalize(parts[0])
+
+  const gc = getGroupConfig(groupJid)
+  const isPrivileged = admin || isBotOwner || getPermLevel(userJid, groupJid) >= 1
+
+  const basicCommands = [
+    '!ping', '!regras', '!status', '!idgrupo', '!se apresentar', '!apresentar',
+    '!meurank', '!rank', '!nivel', '!ranking', '!top', '!comandos'
+  ]
+  const isBasic = basicCommands.includes(cmd)
+
+  // Non-privileged users cannot run admin commands
+  if (!isBasic && !isPrivileged) return false
+  
+  // Basic commands can be blocked via basic_commands_enabled (except for privileged users)
+  if (isBasic && !gc.basic_commands_enabled && !isPrivileged) return false
+
+  // ─── !habilitar ───
+  if (cmd === '!habilitar') {
+    if (!isPrivileged) return true
+    const enabled = gc.basic_commands_enabled ? 0 : 1
+    setGroupConfig(groupJid, 'basic_commands_enabled', enabled)
+    await safeSendMessage(sock, groupJid, { text: enabled ? '✅ Comandos básicos (rank, regras, ping) liberados para todos!' : '❌ Comandos básicos restritos para VIPs/Admins.' })
+    return true
+  }
+
+  // ─── !comandos ───
+  if (cmd === '!comandos') {
+    await safeSendMessage(sock, groupJid, { text: `🤖 *Comandos Básicos do Mahito*\n\n• !meurank — Veja seu nível e XP\n• !ranking — Mostra o Top 10 mais ativos\n• !regras — Lê as regras do grupo\n• !se apresentar — Fala sobre o MU Elysian\n• !status — Mostra se o bot tá online\n• !ping — Pong!` })
+    return true
+  }
 
   if (cmd === '!ping') { await safeSendMessage(sock, groupJid, { text: '🏓 Pong!' }); return true }
   if (cmd === '!regras') { await safeSendMessage(sock, groupJid, { text: config.rulesText || 'Sem regras.' }); return true }
@@ -618,7 +708,7 @@ async function handleAdminGroupCommands(sock, msg, text, groupJid, userJid) {
 module.exports = {
   processOwnerPrivate,
   processCustomerPrivate,
-  handleAdminGroupCommands,
+  handleGroupCommands,
   scheduleAllMessages,
   sendMahitoSticker
 }

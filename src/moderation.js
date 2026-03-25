@@ -105,13 +105,17 @@ function getInstantBanReason(text, groupId, globalConfig) {
   const foundLink = allBadLinks.find(link => t.includes(normalize(link)))
   if (foundLink) return `link_grave:${foundLink}`
 
-  const foundWord = allBadWords.find(word => t.includes(normalize(word)))
+  const foundWord = allBadWords.find(word => {
+    const regex = new RegExp(`\\b${normalize(word)}\\b`, 'i')
+    return regex.test(t)
+  })
   if (foundWord) return `palavra_grave:${foundWord}`
 
   const foundComp = allCompetitors.find(name => {
     const n = normalize(name)
     if (n === 'mu elysian') return false // Exceção: MU Elysian é nosso
-    return t.includes(n)
+    const regex = new RegExp(`\\b${n}\\b`, 'i')
+    return regex.test(t)
   })
   if (foundComp) return `concorrente:${foundComp}`
 

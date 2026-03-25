@@ -18,7 +18,7 @@ const { handleModeration, handleGroupParticipantsUpdate } = require('./moderatio
 const {
   processOwnerPrivate,
   processCustomerPrivate,
-  handleAdminGroupCommands,
+  handleGroupCommands,
   scheduleAllMessages
 } = require('./commands')
 const { isAdmin } = require('./group')
@@ -177,12 +177,11 @@ async function connect() {
       }
     }
 
-    // Admin commands
+    // Group Commands
     const admin = await isAdmin(sock, remoteJid, senderJid)
-    if (admin || isOwner(senderJid, currentConfig)) {
-      const handled = await handleAdminGroupCommands(sock, msg, text, remoteJid, senderJid)
-      if (handled) return
-    }
+    const isBotOwner = isOwner(senderJid, currentConfig)
+    const handled = await handleGroupCommands(sock, msg, text, remoteJid, senderJid, admin, isBotOwner)
+    if (handled) return
 
     // Moderation
     await handleModeration(sock, msg)
