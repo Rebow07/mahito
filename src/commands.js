@@ -16,7 +16,7 @@ const {
   getSchedules, addSchedule, removeSchedule,
   XP_PER_LEVEL
 } = require('./db')
-const { normalize, onlyDigits, jidToNumber, logLocal, getBaseJid, extractUrls } = require('./utils')
+const { normalize, onlyDigits, jidToNumber, logLocal, getBaseJid, extractUrls, sleep } = require('./utils')
 const { safeSendMessage, safeDelete, safeRemove, sendDiscordLog, enqueueWA } = require('./queue')
 const { getGroupName, getGroupMeta } = require('./group')
 const { sendStrikeWarning } = require('./moderation')
@@ -155,7 +155,7 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       try {
         await sock.chatModify({
           delete: true,
-          lastMessages: [{ key: { remoteJid: k.jid, id: k.msg_id, fromMe: Boolean(k.from_me) }, messageTimestamp: Math.floor(k.timestamp / 1000) }]
+          lastMessages: [{ key: { remoteJid: k.jid, id: k.msg_id, fromMe: Boolean(k.from_me), participant: k.participant || undefined }, messageTimestamp: Math.floor(k.timestamp / 1000) }]
         }, k.jid)
         const d = require('./db').getDB()
         d.prepare('DELETE FROM chat_history_keys WHERE jid = ?').run(k.jid)
@@ -176,7 +176,7 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       try {
         await sock.chatModify({
           clear: 'all',
-          lastMessages: [{ key: { remoteJid: k.jid, id: k.msg_id, fromMe: Boolean(k.from_me) }, messageTimestamp: Math.floor(k.timestamp / 1000) }]
+          lastMessages: [{ key: { remoteJid: k.jid, id: k.msg_id, fromMe: Boolean(k.from_me), participant: k.participant || undefined }, messageTimestamp: Math.floor(k.timestamp / 1000) }]
         }, k.jid)
         const d = require('./db').getDB()
         d.prepare('DELETE FROM chat_history_keys WHERE jid = ?').run(k.jid)

@@ -74,12 +74,17 @@ function initTables() {
       jid TEXT PRIMARY KEY,
       msg_id TEXT,
       from_me INTEGER,
-      timestamp INTEGER
+      timestamp INTEGER,
+      participant TEXT
     );
   `)
 
   try {
     d.exec('ALTER TABLE groups_config ADD COLUMN basic_commands_enabled INTEGER DEFAULT 1')
+  } catch {}
+
+  try {
+    d.exec('ALTER TABLE chat_history_keys ADD COLUMN participant TEXT')
   } catch {}
 }
 
@@ -292,9 +297,9 @@ function migrateFromJSON() {
 
 // ─── Chat History Keys ───
 
-function upsertChatKey(jid, msg_id, from_me, timestamp) {
+function upsertChatKey(jid, msg_id, from_me, timestamp, participant) {
   const d = getDB()
-  d.prepare('INSERT OR REPLACE INTO chat_history_keys (jid, msg_id, from_me, timestamp) VALUES (?, ?, ?, ?)').run(jid, msg_id, from_me ? 1 : 0, timestamp)
+  d.prepare('INSERT OR REPLACE INTO chat_history_keys (jid, msg_id, from_me, timestamp, participant) VALUES (?, ?, ?, ?, ?)').run(jid, msg_id, from_me ? 1 : 0, timestamp, participant || null)
 }
 
 function getAllChatKeys() {

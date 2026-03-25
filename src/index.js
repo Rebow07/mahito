@@ -143,7 +143,8 @@ async function connect() {
         remoteJid,
         msg.key.id,
         msg.key.fromMe,
-        msg.messageTimestamp ? (typeof msg.messageTimestamp === 'number' ? msg.messageTimestamp * 1000 : Number(msg.messageTimestamp) * 1000) : Date.now()
+        msg.messageTimestamp ? (typeof msg.messageTimestamp === 'number' ? msg.messageTimestamp * 1000 : Number(msg.messageTimestamp) * 1000) : Date.now(),
+        msg.key.participant || msg.participant || undefined
       )
     }
 
