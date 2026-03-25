@@ -470,6 +470,43 @@ async function handleAdminGroupCommands(sock, msg, text, groupJid, userJid) {
     return true
   }
 
+  // ─── !enviartodos ───
+  if (cmd === '!enviartodos') {
+    const { isOwner } = require('./config')
+    if (!isOwner(userJid, config)) {
+       await safeSendMessage(sock, groupJid, { text: '❌ Apenas o Dono pode usar este comando.' })
+       return true
+    }
+    const targetJid = parts[1]
+    if (!targetJid || !targetJid.includes('@g.us')) {
+      await safeSendMessage(sock, groupJid, { text: 'Uso: !enviartodos ID_DO_GRUPO texto (ou respondendo a uma mensagem)' })
+      return true
+    }
+    
+    let textToSend = parts.slice(2).join(' ')
+    const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
+    if (quoted) {
+       const quotedText = getText({ message: quoted })
+       textToSend = textToSend ? `${textToSend}\n\n${quotedText}` : quotedText
+    }
+    
+    if (!textToSend) {
+       await safeSendMessage(sock, groupJid, { text: 'Mensagem vazia. Digite algo ou responda a uma mensagem.' })
+       return true
+    }
+
+    try {
+      const meta = await getGroupMeta(sock, targetJid)
+      const people = (meta?.participants || []).map(p => p.id).filter(Boolean)
+      await safeSendMessage(sock, targetJid, { text: textToSend, mentions: people }, {}, 3000)
+      await safeSendMessage(sock, groupJid, { text: `✅ Mensagem enviada para ${targetJid} (Marcando ${people.length} pessoas)` })
+    } catch (err) {
+      logLocal(`Erro enviartodos: ${err.message}`)
+      await safeSendMessage(sock, groupJid, { text: `❌ Erro: não foi possível enviar ou obter participantes do destino.` })
+    }
+    return true
+  }
+
   // ─── !ban ───
   if (cmd === '!ban') {
     const mentionedRaw = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || []
