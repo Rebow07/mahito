@@ -252,14 +252,10 @@ async function handleGroupParticipantsUpdate(sock, update) {
   }
 
   if (update.action === 'remove' && groupConfig.leave_enabled) {
-    const phrases = [
-      '😢 Humanos são tão frágeis...',
-      '☹️ Mais um que não aguentou.',
-      '💀 Ele não sobreviveu.',
-      '😈 A fraqueza sempre aparece no final.'
-    ]
-    const message = phrases[Math.floor(Math.random() * phrases.length)]
-    await safeSendMessage(sock, update.id, { text: message }, {}, 3000)
+    const baseJid = getBaseJid(update.participants?.[0] || '')
+    const number = jidToNumber(baseJid)
+    const text = (groupConfig.leave_text || '☹️ @user não aguentou e abandonou o Mahito.').replace('@user', `@${number}`)
+    await safeSendMessage(sock, update.id, { text, mentions: [baseJid] }, {}, 3000)
     await enviarReacaoMahito(sock, update.id, 'ban').catch(() => {})
   }
 }

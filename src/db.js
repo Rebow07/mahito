@@ -36,7 +36,9 @@ function initTables() {
       basic_commands_enabled INTEGER DEFAULT 1,
       anti_word_enabled INTEGER DEFAULT 1,
       anti_competitor_enabled INTEGER DEFAULT 1,
-      ai_interactive_enabled INTEGER DEFAULT 1
+      ai_interactive_enabled INTEGER DEFAULT 1,
+      xp_enabled INTEGER DEFAULT 1,
+      leave_text TEXT DEFAULT '☹️ @user não aguentou e abandonou o Mahito.'
     );
 
     CREATE TABLE IF NOT EXISTS users_data (
@@ -93,6 +95,8 @@ function initTables() {
   try { d.exec('ALTER TABLE groups_config ADD COLUMN anti_word_enabled INTEGER DEFAULT 1') } catch {}
   try { d.exec('ALTER TABLE groups_config ADD COLUMN anti_competitor_enabled INTEGER DEFAULT 1') } catch {}
   try { d.exec('ALTER TABLE groups_config ADD COLUMN ai_interactive_enabled INTEGER DEFAULT 1') } catch {}
+  try { d.exec('ALTER TABLE groups_config ADD COLUMN xp_enabled INTEGER DEFAULT 1') } catch {}
+  try { d.exec("ALTER TABLE groups_config ADD COLUMN leave_text TEXT DEFAULT '☹️ @user não aguentou e abandonou o Mahito.'") } catch {}
 }
 
 // ─── Groups Config ───
@@ -114,7 +118,8 @@ function setGroupConfig(groupId, key, value) {
     'anti_link_enabled', 'anti_spam_enabled', 'anti_spam_max',
     'anti_spam_interval', 'welcome_enabled', 'welcome_text',
     'leave_enabled', 'presentation_text', 'basic_commands_enabled',
-    'anti_word_enabled', 'anti_competitor_enabled', 'ai_interactive_enabled'
+    'anti_word_enabled', 'anti_competitor_enabled', 'ai_interactive_enabled',
+    'xp_enabled', 'leave_text'
   ]
   if (!allowed.includes(key)) return false
   d.prepare('INSERT OR IGNORE INTO groups_config (group_id) VALUES (?)').run(groupId)

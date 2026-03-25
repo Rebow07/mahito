@@ -17,9 +17,9 @@ Mahito Ã© um bot focado em moderaÃ§Ã£o, ranking, whitelist, blacklist, ant
 ### [25/03/2026] - v3.1.1
 - **Expansão do Menu Numérico:** Inclusão das categorias perdidas (Links Permitidos, Automação e Identidade Mahito) no novo Menu de Dono Interativo. Todas as opções agora operam com o fluxo de perguntas passo-a-passo.
 
-### [25/03/2026] - v3.1.3
-- **Controle Granular por Grupo (Upgrade Major):** Agora o Mahito permite que cada grupo tenha sua própria "personalidade".
-- **Dashboard de Grupo:** Novo menu interativo no privado do dono que permite listar grupos autorizados e abrir um painel de controle para cada um.
-- **Configurações Independentes:** Limite de strikes, mensagem de boas-vindas, e ativação de módulos (Anti-Link, Anti-Spam, Anti-Palavrão, etc) agora são salvos por grupo no SQLite.
-- **Blacklists Independentes:** Você pode cadastrar palavras ou links proibidos que valem apenas para um grupo específico, sem afetar os outros.
-- **Módulo de Saída:** Agora o dono pode remover o bot de qualquer grupo diretamente pelo menu numérico do Whats.
+### [25/03/2026] - v3.1.4
+- **Dashboard de Grupo Ultra-Geral:** Expansão massiva do painel de controle individual por grupo.
+- **Configuração de XP:** Agora você pode ativar ou desativar o ganho de XP e níveis de forma independente em cada grupo.
+- **Mensagens de Saída Customizadas:** Adicionado suporte para habilitar/desabilitar avisos de quem sai do grupo e definir frases personalizadas por grupo.
+- **Gestão de Admins do Bot:** Novo menu de "Gerenciar Permissões" dentro do dashboard para listar, promover ou rebaixar VIPs e Moderadores (níveis 1 e 2) diretamente pelo painel.
+- **Reset de Permissões:** Opção de limpar todos os cargos de um grupo específico com um clique.

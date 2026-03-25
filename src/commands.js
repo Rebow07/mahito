@@ -77,7 +77,11 @@ async function renderGroupDashboard(sock, groupJid) {
     `7️⃣ Boas-vindas: *[${gc.welcome_enabled ? 'ON' : 'OFF'}]*\n` +
     `8️⃣ Sair do Grupo (Kick Bot)\n` +
     `9️⃣ Ver Blacklist do Grupo\n` +
-    `🔟 Mudar Texto de Boas-vindas\n\n` +
+    `🔟 Mudar Texto de Boas-vindas\n` +
+    `1️⃣1️⃣ Sistema de XP: *[${gc.xp_enabled ? 'ON' : 'OFF'}]*\n` +
+    `1️⃣2️⃣ Mensagem de Saída: *[${gc.leave_enabled ? 'ON' : 'OFF'}]*\n` +
+    `1️⃣3️⃣ Mudar Texto de Saída\n` +
+    `1️⃣4️⃣ Gerenciar Permissões (VIPs/Mod)\n\n` +
     `0️⃣ Voltar`
   )
 }
@@ -372,7 +376,9 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       '4': 'anti_word_enabled',
       '5': 'anti_competitor_enabled',
       '6': 'basic_commands_enabled',
-      '7': 'welcome_enabled'
+      '7': 'welcome_enabled',
+      '11': 'xp_enabled',
+      '12': 'leave_enabled'
     }
     if (toggles[msg]) {
       const key = toggles[msg]
@@ -401,6 +407,48 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       await safeSendMessage(sock, jid, { text: '💬 Digite o novo texto de boas-vindas (Use @user para citar o membro):' })
       return
     }
+    if (msg === '13') {
+      state.customerStates[jid].flow = 'awaiting_group_leave_text'
+      await safeSendMessage(sock, jid, { text: '💬 Digite o novo texto de saída (Use @user para citar o membro):' })
+      return
+    }
+    if (msg === '14') {
+      state.customerStates[jid].flow = 'menu_group_perms'
+      const mods = getGroupRanking(targetJid, 100).filter(u => u.perm_level >= 1)
+      const lines = mods.map(u => `• @${jidToNumber(u.user_id)} - ${u.perm_level === 2 ? 'MOD ⚔️' : u.perm_level === 1 ? 'VIP ⭐' : 'MEMBRO'}`)
+      const text = `👥 *Permissões do Grupo*\n\n${lines.join('\n') || 'Nenhum Mod/VIP cadastrado.'}\n\n1️⃣ Promover/Rebaixar Membro\n2️⃣ Remover Todas as Permissões\n0️⃣ Voltar`
+      await safeSendMessage(sock, jid, { text, mentions: mods.map(u => u.user_id) })
+      return
+    }
+  }
+
+  if (sc.flow === 'menu_group_perms') {
+    if (msg === '0') { state.customerStates[jid].flow = 'menu_group_dashboard'; await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) }); return }
+    if (msg === '1') {
+      state.customerStates[jid].flow = 'awaiting_group_perm_promote'
+      await safeSendMessage(sock, jid, { text: '💬 Digite o número e nível (Ex: 5511999999999|2 para MOD ou |1 para VIP):' })
+      return
+    }
+    if (msg === '2') {
+      const d = require('./db').getDB()
+      d.prepare('UPDATE users_data SET perm_level = 0 WHERE group_id = ?').run(sc.selectedGroupJid)
+      await safeSendMessage(sock, jid, { text: '✅ Todas as permissões (VIP/MOD) deste grupo foram resetadas.' })
+      state.customerStates[jid].flow = 'menu_group_dashboard'
+      await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
+      return
+    }
+  }
+
+  if (sc.flow === 'awaiting_group_perm_promote') {
+    const [num, lvl] = msg.split('|')
+    if (num && lvl) {
+      const targetJid = jidToNumber(num) + '@s.whatsapp.net'
+      setPermLevel(targetJid, sc.selectedGroupJid, parseInt(lvl))
+      await safeSendMessage(sock, jid, { text: `✅ Permissão de @${jidToNumber(targetJid)} alterada para Nível ${lvl}.`, mentions: [targetJid] })
+    }
+    state.customerStates[jid].flow = 'menu_group_dashboard'
+    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
+    return
   }
 
   if (sc.flow === 'awaiting_group_max_strikes') {
@@ -417,6 +465,14 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
   if (sc.flow === 'awaiting_group_welcome_text') {
     setGroupConfig(sc.selectedGroupJid, 'welcome_text', raw.trim())
     await safeSendMessage(sock, jid, { text: '✅ Texto atualizado.' })
+    state.customerStates[jid].flow = 'menu_group_dashboard'
+    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
+    return
+  }
+
+  if (sc.flow === 'awaiting_group_leave_text') {
+    setGroupConfig(sc.selectedGroupJid, 'leave_text', raw.trim())
+    await safeSendMessage(sock, jid, { text: '✅ Texto de saída atualizado.' })
     state.customerStates[jid].flow = 'menu_group_dashboard'
     await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
     return

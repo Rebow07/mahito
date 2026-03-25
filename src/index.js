@@ -201,8 +201,9 @@ async function connect() {
     if (!text) return
 
     // ─── XP System ───
+    const groupConfig = getGroupConfig(remoteJid)
     const permLevel = getPermLevel(senderJid, remoteJid)
-    if (permLevel === 0 && text.length > 1) {
+    if (groupConfig.xp_enabled && permLevel === 0 && text.length > 1) {
       const result = addXP(senderJid, remoteJid)
       if (result.leveledUp) {
         await safeSendMessage(sock, remoteJid, {
