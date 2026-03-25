@@ -376,17 +376,27 @@ async function handleAdminGroupCommands(sock, msg, text, groupJid, userJid) {
     const levels = { 0: 'Membro', 1: 'VIP', 2: 'Mod', 3: 'Dono' }
     const vips = ranking.filter(u => u.perm_level >= 1)
     
+    // Adiciona os donos do config
     for (const num of config.ownerNumbers) {
        const oJid = `${num}@s.whatsapp.net`
        if (!vips.find(u => getBaseJid(u.user_id) === oJid)) {
           vips.push({ user_id: oJid, perm_level: 3 })
        }
     }
-    vips.sort((a, b) => b.perm_level - a.perm_level)
 
-    if (!vips.length) { await safeSendMessage(sock, groupJid, { text: 'Nenhum membro com permissão elevada.' }); return true }
-    const lines = vips.map(u => `${levels[u.perm_level] || '?'} — ${jidToNumber(u.user_id)} (Nível ${u.perm_level})`).join('\n')
-    await safeSendMessage(sock, groupJid, { text: `👑 *Hierarquia do Grupo*\n\n${lines}` })
+    // Filtra o próprio bot (ele não precisa aparecer na hierarquia repetido)
+    const botJid = getBaseJid(sock.user.id)
+    const filteredVips = vips.filter(u => getBaseJid(u.user_id) !== botJid)
+
+    filteredVips.sort((a, b) => b.perm_level - a.perm_level)
+
+    if (!filteredVips.length) { await safeSendMessage(sock, groupJid, { text: 'Nenhum membro com permissão elevada.' }); return true }
+    
+    // Usa @ para o WhatsApp renderizar o nome do contato automaticamente
+    const lines = filteredVips.map(u => `*${levels[u.perm_level] || '?'}* — @${jidToNumber(u.user_id)}`).join('\n')
+    const mentions = filteredVips.map(u => getBaseJid(u.user_id))
+
+    await safeSendMessage(sock, groupJid, { text: `👑 *Hierarquia do Grupo*\n\n${lines}`, mentions })
     return true
   }
 
