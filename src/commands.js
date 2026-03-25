@@ -59,6 +59,9 @@ function ownerPrivateMenu(config) {
     `grupo add 123@g.us\n` +
     `grupo rm 123@g.us\n` +
     `grupo list\n\n` +
+    `💬 *Mensagens*\n` +
+    `dm 5511999999999 Olá!\n` +
+    `comunicado   → assistente global\n\n` +
     `🚫 *Proteção*\n` +
     `banword add texto\n` +
     `banword rm texto\n` +
@@ -73,8 +76,7 @@ function ownerPrivateMenu(config) {
     `agenda rm ID\n\n` +
     `🎭 *Mahito*\n` +
     `foto perfil  → envie imagem\n` +
-    `mahito teste → figurinha\n` +
-    `comunicado   → assistente de envio\n\n` +
+    `mahito teste → figurinha\n\n` +
     `⚙️ *Sistema*\n` +
     `reiniciar → reinicia o bot\n` +
     `atualizar → git pull + restart\n\n` +
@@ -313,6 +315,20 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     return
   }
 
+  if (lf === 'dm' && second) {
+    const rawNumber = onlyDigits(second)
+    const targetJid = `${rawNumber}@s.whatsapp.net`
+    const dmText = rest.join(' ').trim()
+    if (!dmText) { await safeSendMessage(sock, jid, { text: '❌ Digite o texto. Ex: dm 55119999999 Texto' }); return }
+    try {
+      await safeSendMessage(sock, targetJid, { text: dmText })
+      await safeSendMessage(sock, jid, { text: `✅ Mensagem enviada no privado de @${rawNumber}` })
+    } catch {
+      await safeSendMessage(sock, jid, { text: `❌ Não foi possível mandar mensagem para ${rawNumber}.` })
+    }
+    return
+  }
+
   if (msg === 'reiniciar' || msg === 'reboot') { await restartBotProcess(sock, jid); return }
   if (msg === 'atualizar' || msg === 'update') { await updateBotProcess(sock, jid); return }
 
@@ -366,12 +382,18 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
   // Basic commands can be blocked via basic_commands_enabled (except for privileged users)
   if (isBasic && !gc.basic_commands_enabled && !isPrivileged) return false
 
-  // ─── !habilitar ───
+  // ─── !habilitar e !desabilitar ───
   if (cmd === '!habilitar') {
     if (!isPrivileged) return true
-    const enabled = gc.basic_commands_enabled ? 0 : 1
-    setGroupConfig(groupJid, 'basic_commands_enabled', enabled)
-    await safeSendMessage(sock, groupJid, { text: enabled ? '✅ Comandos básicos (rank, regras, ping) liberados para todos!' : '❌ Comandos básicos restritos para VIPs/Admins.' })
+    setGroupConfig(groupJid, 'basic_commands_enabled', 1)
+    await safeSendMessage(sock, groupJid, { text: '✅ Comandos básicos (rank, regras, ping) liberados para todos os membros!' })
+    return true
+  }
+
+  if (cmd === '!desabilitar') {
+    if (!isPrivileged) return true
+    setGroupConfig(groupJid, 'basic_commands_enabled', 0)
+    await safeSendMessage(sock, groupJid, { text: '❌ Comandos básicos agora são exclusivos para VIPs e Administração.' })
     return true
   }
 
@@ -600,6 +622,58 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     } catch (err) {
       logLocal(`Erro enviartodos: ${err.message}`)
       await safeSendMessage(sock, groupJid, { text: `❌ Erro: não foi possível enviar ou obter participantes do destino.` })
+    }
+    return true
+  }
+
+  // ─── !dm (Mensagem Privada) ───
+  if (cmd === '!dm' || cmd === '!pv') {
+    const { isOwner } = require('./config')
+    if (!isOwner(userJid, config)) {
+       await safeSendMessage(sock, groupJid, { text: '❌ Apenas o Dono pode usar este comando.' })
+       return true
+    }
+    
+    // Suporta menções: "!dm @user Texto" ou "!dm 5511... Texto"
+    let targetNumber = parts[1] || ''
+    const mentionedRaw = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || []
+    
+    let targetJid = null
+    if (mentionedRaw.length > 0) {
+      targetJid = getBaseJid(mentionedRaw[0])
+      // Remove o texto da menção da array de parts se começar com @
+      if (targetNumber.startsWith('@')) parts.splice(1, 1)
+    } else {
+      targetNumber = onlyDigits(targetNumber)
+      if (targetNumber) {
+        targetJid = `${targetNumber}@s.whatsapp.net`
+      }
+    }
+    
+    if (!targetJid) {
+      await safeSendMessage(sock, groupJid, { text: 'Uso: !dm @user Mensagem ou !dm 5511... Mensagem' })
+      return true
+    }
+    
+    let textToSend = parts.slice(1).join(' ').trim()
+    if (!textToSend && !mentionedRaw.length) textToSend = parts.slice(2).join(' ').trim()
+    
+    const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
+    if (quoted) {
+       const quotedText = getText({ message: quoted })
+       textToSend = textToSend ? `${textToSend}\n\n${quotedText}` : quotedText
+    }
+    
+    if (!textToSend) {
+       await safeSendMessage(sock, groupJid, { text: 'Mensagem vazia. Digite algo ou responda a uma mensagem.' })
+       return true
+    }
+    
+    try {
+      await safeSendMessage(sock, targetJid, { text: textToSend })
+      await safeSendMessage(sock, groupJid, { text: `✅ Mensagem despachada pro privado do alvo!` })
+    } catch {
+      await safeSendMessage(sock, groupJid, { text: `❌ Não foi possível chamar a pessoa no privado.` })
     }
     return true
   }
