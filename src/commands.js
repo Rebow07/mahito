@@ -134,7 +134,12 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
   const raw = String(text || '').trim()
   const msg = normalize(raw)
 
-  if (state.customerStates[jid]?.setProfilePhoto && msgObj?.message?.imageMessage) {
+  const isImage = msgObj?.message?.imageMessage || 
+                  msgObj?.message?.ephemeralMessage?.message?.imageMessage ||
+                  msgObj?.message?.viewOnceMessageV2?.message?.imageMessage ||
+                  msgObj?.message?.viewOnceMessage?.message?.imageMessage
+
+  if (state.customerStates[jid]?.setProfilePhoto && isImage) {
     try {
       const buffer = await downloadMediaMessage(msgObj, 'buffer', {}, { logger: P({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage })
       await enqueueWA('updateProfilePicture', () => sock.updateProfilePicture(sock.user.id, buffer), DELAYS.profile)
