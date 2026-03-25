@@ -52,7 +52,10 @@ function ownerPrivateMenu() {
     `2️⃣ *Gerenciar Grupos* (Add/Remover/Lista)\n` +
     `3️⃣ *Mensagens Globais e DMs*\n` +
     `4️⃣ *Proteção* (Palavras e Concorrentes)\n` +
-    `5️⃣ *Configurações do Sistema* (Reiniciar, Atualizar, Limpar Chats)\n` +
+    `5️⃣ *Links Permitidos* (Domínios Leves)\n` +
+    `6️⃣ *Automação* (Agendamentos Diários)\n` +
+    `7️⃣ *Identidade Mahito* (Foto/Avatar)\n` +
+    `8️⃣ *Configurações do Sistema* (Restart/Wipe)\n` +
     `0️⃣ *Sair do Menu*`
   )
 }
@@ -233,6 +236,21 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       return
     }
     if (msg === '5') {
+      state.customerStates[jid].flow = 'menu_links'
+      await safeSendMessage(sock, jid, { text: `*Links Permitidos*\n\n1️⃣ Permitir Domínio (Ex: youtube.com)\n2️⃣ Remover Domínio\n0️⃣ Voltar` })
+      return
+    }
+    if (msg === '6') {
+      state.customerStates[jid].flow = 'menu_auto'
+      await safeSendMessage(sock, jid, { text: `*Automação / Agenda*\n\n1️⃣ Novo Agendamento\n2️⃣ Listar Agendamentos\n3️⃣ Deletar Agendamento\n0️⃣ Voltar` })
+      return
+    }
+    if (msg === '7') {
+      state.customerStates[jid].flow = 'menu_mahito'
+      await safeSendMessage(sock, jid, { text: `*Identidade Mahito*\n\n1️⃣ Mudar Foto de Perfil\n2️⃣ Enviar Figurinha Mahito\n0️⃣ Voltar` })
+      return
+    }
+    if (msg === '8') {
       state.customerStates[jid].flow = 'menu_sys'
       await safeSendMessage(sock, jid, { text: `*Sistema*\n\n1️⃣ Reiniciar Bot\n2️⃣ Atualizar do GitHub\n3️⃣ Apagar meus DMs (Mantém grupos)\n4️⃣ Limpar Mensagens de Tudo\n0️⃣ Voltar` })
       return
@@ -327,6 +345,92 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     state.customerStates[jid].flow = 'owner_menu'
     await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
     return
+  }
+
+  // Menu Handling logic: Links
+  if (sc.flow === 'menu_links') {
+    if (msg === '1' || msg === '2') {
+      state.customerStates[jid].action = msg === '1' ? 'link_add' : 'link_rm'
+      state.customerStates[jid].flow = 'awaiting_link'
+      await safeSendMessage(sock, jid, { text: '💬 Digite o domínio (ex: seudominio.com):' })
+      return
+    }
+    if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
+  }
+
+  if (sc.flow === 'awaiting_link') {
+    const word = raw.trim()
+    if (sc.action === 'link_add') { config.lightDomains.push(word); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Domínio permitido: ${word}` }) }
+    if (sc.action === 'link_rm') { config.lightDomains = config.lightDomains.filter(w => normalize(w) !== normalize(word)); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Removido: ${word}` }) }
+    state.customerStates[jid].flow = 'owner_menu'
+    await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
+    return
+  }
+
+  // Menu Handling logic: Agenda
+  if (sc.flow === 'menu_auto') {
+    if (msg === '1') {
+      state.customerStates[jid].flow = 'awaiting_agenda'
+      await safeSendMessage(sock, jid, { text: '💬 Envie no formato exato:\nID_DO_GRUPO@g.us|HH:MM|Sua Mensagem' })
+      return
+    }
+    if (msg === '2') {
+      const s = getSchedules()
+      const textOut = s.length ? s.map(x => `ID:${x.id} | ${x.group_id} | ${x.time} | ${x.message}`).join('\n') : 'Nenhum agendamento ativo.'
+      await safeSendMessage(sock, jid, { text: `📅 *Agendamentos*\n\n${textOut}` })
+      state.customerStates[jid].flow = 'owner_menu'
+      await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
+      return
+    }
+    if (msg === '3') {
+      state.customerStates[jid].flow = 'awaiting_agenda_rm'
+      await safeSendMessage(sock, jid, { text: '💬 Digite apenas o ID numérico do agendamento:' })
+      return
+    }
+    if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
+  }
+
+  if (sc.flow === 'awaiting_agenda') {
+    const parts = raw.trim().split('|')
+    if (parts.length < 3) {
+      await safeSendMessage(sock, jid, { text: '❌ Formato inválido. Ex: 123@g.us|09:30|Msg' })
+    } else {
+      const [gJid, time, ...mp] = parts
+      const id = addSchedule(gJid.trim(), time.trim(), mp.join('|').trim())
+      await safeSendMessage(sock, jid, { text: `✅ Agendamento ID ${id} criado com sucesso!` })
+      scheduleAllMessages(sock)
+    }
+    state.customerStates[jid].flow = 'owner_menu'
+    await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
+    return
+  }
+
+  if (sc.flow === 'awaiting_agenda_rm') {
+    const id = Number(onlyDigits(msg))
+    if (id) {
+      removeSchedule(id)
+      await safeSendMessage(sock, jid, { text: `✅ Agendamento ID ${id} removido.` })
+      scheduleAllMessages(sock)
+    } else {
+      await safeSendMessage(sock, jid, { text: '❌ ID inválido.' })
+    }
+    state.customerStates[jid].flow = 'owner_menu'
+    await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
+    return
+  }
+
+  // Menu Handling logic: Mahito
+  if (sc.flow === 'menu_mahito') {
+    if (msg === '1') {
+      state.customerStates[jid].flow = 'owner_menu' // Volta ao menu quando acabar
+      // Call the manual foto perfil handler
+      return processOwnerPrivate(sock, jid, 'foto perfil', msgObj)
+    }
+    if (msg === '2') {
+      state.customerStates[jid].flow = 'owner_menu'
+      return processOwnerPrivate(sock, jid, 'mahito teste', msgObj)
+    }
+    if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
   }
 
   // Menu Handling logic: System

@@ -13,3 +13,7 @@ Mahito √© um bot focado em modera√ß√£o, ranking, whitelist, blacklist, anti-spam
 - **Comandos de Limpeza:** Adicionado os comandos `#apagar conversas` (deleta DMs, ignora as dos donos) e `#limpar conversas` (esvazia as mensagens de todos os grupos e DMs mapeados no banco de dados).
 - **Assistente Global DM:** Adicionada ferramenta completa de envio de Direct Messages pelo bot sem precisar decorar o n√∫mero; o sistema de menu pergunta o destino e a mensagem.
 - **Corre√ß√µes de Bugs:** Consertado o bug da falta da chamada da fun√ß√£o `sleep()` na limpeza, e a inclus√£o da coluna `participant` exigida pelo envio de comandos nas configura√ß√µes de Grupos.
+
+### [25/03/2026] - v3.1.1
+- **Expans„o do Menu NumÈrico:** Inclus„o das categorias perdidas (Links Permitidos, AutomaÁ„o e Identidade Mahito) no novo Menu de Dono Interativo. Todas as opÁıes agora operam com o fluxo de perguntas passo-a-passo.
+
