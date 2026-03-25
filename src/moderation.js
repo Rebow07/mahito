@@ -89,35 +89,40 @@ async function sendStrikeWarning(sock, groupJid, userJid, count, max, reason) {
   await enviarReacaoMahito(sock, groupJid, 'strike').catch(() => {})
 }
 
-function getInstantBanReason(text, groupId, globalConfig) {
+function getInstantBanReason(text, groupId, globalConfig, groupConfig) {
   const t = normalize(text)
 
-  // Check group-specific blacklists from DB
-  const badLinks = getBlacklist(groupId, 'link')
-  const badWords = getBlacklist(groupId, 'word')
-  const badCompetitors = getBlacklist(groupId, 'competitor')
+  // Link Detection (if instant ban links are set)
+  if (groupConfig.anti_link_enabled) {
+    const badLinks = getBlacklist(groupId, 'link')
+    const allBadLinks = [...new Set([...(globalConfig.instantBanLinks || []), ...badLinks])]
+    const foundLink = allBadLinks.find(link => t.includes(normalize(link)))
+    if (foundLink) return `link_grave:${foundLink}`
+  }
 
-  // Merge with global config
-  const allBadLinks = [...new Set([...(globalConfig.instantBanLinks || []), ...badLinks])]
-  const allBadWords = [...new Set([...(globalConfig.instantBanWords || []), ...badWords])]
-  const allCompetitors = [...new Set([...(globalConfig.competitorNames || []), ...badCompetitors])]
+  // Word Detection
+  if (groupConfig.anti_word_enabled) {
+    const badWords = getBlacklist(groupId, 'word')
+    const allBadWords = [...new Set([...(globalConfig.instantBanWords || []), ...badWords])]
+    const foundWord = allBadWords.find(word => {
+      const regex = new RegExp(`\\b${normalize(word)}\\b`, 'i')
+      return regex.test(t)
+    })
+    if (foundWord) return `palavra_grave:${foundWord}`
+  }
 
-  const foundLink = allBadLinks.find(link => t.includes(normalize(link)))
-  if (foundLink) return `link_grave:${foundLink}`
-
-  const foundWord = allBadWords.find(word => {
-    const regex = new RegExp(`\\b${normalize(word)}\\b`, 'i')
-    return regex.test(t)
-  })
-  if (foundWord) return `palavra_grave:${foundWord}`
-
-  const foundComp = allCompetitors.find(name => {
-    const n = normalize(name)
-    if (n === 'mu elysian') return false // Exceção: MU Elysian é nosso
-    const regex = new RegExp(`\\b${n}\\b`, 'i')
-    return regex.test(t)
-  })
-  if (foundComp) return `concorrente:${foundComp}`
+  // Competitor Detection
+  if (groupConfig.anti_competitor_enabled) {
+    const badCompetitors = getBlacklist(groupId, 'competitor')
+    const allCompetitors = [...new Set([...(globalConfig.competitorNames || []), ...badCompetitors])]
+    const foundComp = allCompetitors.find(name => {
+      const n = normalize(name)
+      if (n === 'mu elysian') return false // Exceção: MU Elysian é nosso
+      const regex = new RegExp(`\\b${n}\\b`, 'i')
+      return regex.test(t)
+    })
+    if (foundComp) return `concorrente:${foundComp}`
+  }
 
   return null
 }
@@ -178,7 +183,7 @@ async function handleModeration(sock, msg) {
   }
 
   // ─── Instant Ban (bad words, links, competitors) ───
-  const instantReason = getInstantBanReason(text, groupJid, globalConfig)
+  const instantReason = getInstantBanReason(text, groupJid, globalConfig, groupConfig)
   if (instantReason) {
     const reasonType = instantReason.split(':')[0]
     await safeDelete(sock, groupJid, msg.key, userJid)

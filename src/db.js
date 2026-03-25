@@ -33,7 +33,10 @@ function initTables() {
       welcome_text TEXT DEFAULT '😈 Bem-vindo, @user. Tente não quebrar tão rápido.',
       leave_enabled INTEGER DEFAULT 1,
       presentation_text TEXT DEFAULT '',
-      basic_commands_enabled INTEGER DEFAULT 1
+      basic_commands_enabled INTEGER DEFAULT 1,
+      anti_word_enabled INTEGER DEFAULT 1,
+      anti_competitor_enabled INTEGER DEFAULT 1,
+      ai_interactive_enabled INTEGER DEFAULT 1
     );
 
     CREATE TABLE IF NOT EXISTS users_data (
@@ -86,6 +89,10 @@ function initTables() {
   try {
     d.exec('ALTER TABLE chat_history_keys ADD COLUMN participant TEXT')
   } catch {}
+
+  try { d.exec('ALTER TABLE groups_config ADD COLUMN anti_word_enabled INTEGER DEFAULT 1') } catch {}
+  try { d.exec('ALTER TABLE groups_config ADD COLUMN anti_competitor_enabled INTEGER DEFAULT 1') } catch {}
+  try { d.exec('ALTER TABLE groups_config ADD COLUMN ai_interactive_enabled INTEGER DEFAULT 1') } catch {}
 }
 
 // ─── Groups Config ───
@@ -106,7 +113,8 @@ function setGroupConfig(groupId, key, value) {
     'group_name', 'max_penalties', 'ignore_admins',
     'anti_link_enabled', 'anti_spam_enabled', 'anti_spam_max',
     'anti_spam_interval', 'welcome_enabled', 'welcome_text',
-    'leave_enabled', 'presentation_text', 'basic_commands_enabled'
+    'leave_enabled', 'presentation_text', 'basic_commands_enabled',
+    'anti_word_enabled', 'anti_competitor_enabled', 'ai_interactive_enabled'
   ]
   if (!allowed.includes(key)) return false
   d.prepare('INSERT OR IGNORE INTO groups_config (group_id) VALUES (?)').run(groupId)

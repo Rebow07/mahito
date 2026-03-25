@@ -49,14 +49,36 @@ function ownerPrivateMenu() {
     `🤖✨ *Mahito — Sistema de Controle*\n\n` +
     `Escolha uma categoria (digite o número):\n\n` +
     `1️⃣ *Controle de Usuários* (Whitelist/Blacklist)\n` +
-    `2️⃣ *Gerenciar Grupos* (Add/Remover/Lista)\n` +
+    `2️⃣ *Gerenciar Grupos* (Add/Remover/Dashboard)\n` +
     `3️⃣ *Mensagens Globais e DMs*\n` +
-    `4️⃣ *Proteção* (Palavras e Concorrentes)\n` +
+    `4️⃣ *Proteção Global* (Palavras e Concorrentes)\n` +
     `5️⃣ *Links Permitidos* (Domínios Leves)\n` +
     `6️⃣ *Automação* (Agendamentos Diários)\n` +
     `7️⃣ *Identidade Mahito* (Foto/Avatar)\n` +
     `8️⃣ *Configurações do Sistema* (Restart/Wipe)\n` +
     `0️⃣ *Sair do Menu*`
+  )
+}
+
+async function renderGroupDashboard(sock, groupJid) {
+  const gc = getGroupConfig(groupJid)
+  const meta = await getGroupMeta(sock, groupJid)
+  const groupName = meta?.subject || 'Grupo Desconhecido'
+
+  return (
+    `📊 *Dashboard: ${groupName}*\n` +
+    `🆔 ID: ${groupJid}\n\n` +
+    `1️⃣ Limite de Strikes: *[${gc.max_penalties}]*\n` +
+    `2️⃣ Anti-Link: *[${gc.anti_link_enabled ? 'ON' : 'OFF'}]*\n` +
+    `3️⃣ Anti-Spam: *[${gc.anti_spam_enabled ? 'ON' : 'OFF'}]*\n` +
+    `4️⃣ Anti-Palavrão: *[${gc.anti_word_enabled ? 'ON' : 'OFF'}]*\n` +
+    `5️⃣ Anti-Concorrente: *[${gc.anti_competitor_enabled ? 'ON' : 'OFF'}]*\n` +
+    `6️⃣ Comandos Membros: *[${gc.basic_commands_enabled ? 'ON' : 'OFF'}]*\n` +
+    `7️⃣ Boas-vindas: *[${gc.welcome_enabled ? 'ON' : 'OFF'}]*\n` +
+    `8️⃣ Sair do Grupo (Kick Bot)\n` +
+    `9️⃣ Ver Blacklist do Grupo\n` +
+    `🔟 Mudar Texto de Boas-vindas\n\n` +
+    `0️⃣ Voltar`
   )
 }
 
@@ -227,7 +249,7 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     }
     if (msg === '2') {
       state.customerStates[jid].flow = 'menu_groups'
-      await safeSendMessage(sock, jid, { text: `*Gerenciar Grupos*\n\n1️⃣ Adicionar Grupo (Permitir Bot)\n2️⃣ Remover Grupo\n3️⃣ Listar Meus Grupos\n0️⃣ Voltar` })
+      await safeSendMessage(sock, jid, { text: `*Gerenciar Grupos*\n\n1️⃣ Adicionar Grupo (Permitir Bot)\n2️⃣ Remover Grupo\n3️⃣ Listar Meus Grupos\n4️⃣ CONFIGURAR GRUPO (Dashboard)\n0️⃣ Voltar` })
       return
     }
     if (msg === '3') {
@@ -303,7 +325,129 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
       return
     }
+    if (msg === '4') {
+      const allowed = getAllowedGroups()
+      if (!allowed.length) {
+        await safeSendMessage(sock, jid, { text: '❌ Nenhum grupo na lista de autorizados ainda.' })
+        return
+      }
+      const chats = await sock.groupFetchAllParticipating()
+      const lines = allowed.map((gJid, i) => `${i + 1}. ${chats[gJid]?.subject || 'Grupo'} (${gJid})`)
+      state.customerStates[jid].flow = 'menu_group_select'
+      state.customerStates[jid].groupsList = allowed
+      await safeSendMessage(sock, jid, { text: `🎯 *Selecione o grupo para configurar*:\n\n${lines.join('\n')}\n\n0️⃣ Voltar` })
+      return
+    }
     if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
+  }
+
+  if (sc.flow === 'menu_group_select') {
+    if (msg === '0') { state.customerStates[jid].flow = 'menu_groups'; await safeSendMessage(sock, jid, { text: `*Gerenciar Grupos*\n\n1️⃣ Adicionar Grupo (Permitir Bot)\n2️⃣ Remover Grupo\n3️⃣ Listar Meus Grupos\n4️⃣ CONFIGURAR GRUPO (Dashboard)\n0️⃣ Voltar` }); return }
+    const idx = parseInt(msg) - 1
+    const groups = sc.groupsList || []
+    if (!isNaN(idx) && idx >= 0 && idx < groups.length) {
+      const targetJid = groups[idx]
+      state.customerStates[jid].selectedGroupJid = targetJid
+      state.customerStates[jid].flow = 'menu_group_dashboard'
+      await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, targetJid) })
+    } else {
+      await safeSendMessage(sock, jid, { text: '❌ Seleção inválida.' })
+    }
+    return
+  }
+
+  if (sc.flow === 'menu_group_dashboard') {
+    const targetJid = sc.selectedGroupJid
+    if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
+    
+    if (msg === '1') {
+      state.customerStates[jid].flow = 'awaiting_group_max_strikes'
+      await safeSendMessage(sock, jid, { text: '💬 Digite o novo limite de strikes (Ex: 5):' })
+      return
+    }
+    // Toggles
+    const toggles = {
+      '2': 'anti_link_enabled',
+      '3': 'anti_spam_enabled',
+      '4': 'anti_word_enabled',
+      '5': 'anti_competitor_enabled',
+      '6': 'basic_commands_enabled',
+      '7': 'welcome_enabled'
+    }
+    if (toggles[msg]) {
+      const key = toggles[msg]
+      const current = getGroupConfig(targetJid)[key]
+      setGroupConfig(targetJid, key, current ? 0 : 1)
+      await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, targetJid) })
+      return
+    }
+    if (msg === '8') {
+       await safeSendMessage(sock, jid, { text: '👋 Saindo do grupo...' })
+       await safeRemove(sock, targetJid, getBaseJid(sock.user.id))
+       state.customerStates[jid].flow = 'owner_menu'
+       await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
+       return
+    }
+    if (msg === '9') {
+      const words = getBlacklist(targetJid, 'word')
+      const links = getBlacklist(targetJid, 'link')
+      const comps = getBlacklist(targetJid, 'competitor')
+      await safeSendMessage(sock, jid, { text: `📓 *Blacklist do Grupo*\n\n🔤 Palavras: ${words.join(', ') || 'Nenhuma'}\n🔗 Links: ${links.join(', ') || 'Nenhum'}\n👤 Concorrentes: ${comps.join(', ') || 'Nenhum'}\n\n1️⃣ Add/Rm Palavra\n2️⃣ Add/Rm Link\n3️⃣ Add/Rm Concorrente\n0️⃣ Voltar` })
+      state.customerStates[jid].flow = 'menu_group_blacklist_type'
+      return
+    }
+    if (msg === '10') {
+      state.customerStates[jid].flow = 'awaiting_group_welcome_text'
+      await safeSendMessage(sock, jid, { text: '💬 Digite o novo texto de boas-vindas (Use @user para citar o membro):' })
+      return
+    }
+  }
+
+  if (sc.flow === 'awaiting_group_max_strikes') {
+    const val = parseInt(onlyDigits(msg))
+    if (!isNaN(val)) {
+      setGroupConfig(sc.selectedGroupJid, 'max_penalties', val)
+      await safeSendMessage(sock, jid, { text: '✅ Limite atualizado.' })
+    }
+    state.customerStates[jid].flow = 'menu_group_dashboard'
+    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
+    return
+  }
+
+  if (sc.flow === 'awaiting_group_welcome_text') {
+    setGroupConfig(sc.selectedGroupJid, 'welcome_text', raw.trim())
+    await safeSendMessage(sock, jid, { text: '✅ Texto atualizado.' })
+    state.customerStates[jid].flow = 'menu_group_dashboard'
+    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
+    return
+  }
+
+  if (sc.flow === 'menu_group_blacklist_type') {
+    if (msg === '0') { state.customerStates[jid].flow = 'menu_group_dashboard'; await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) }); return }
+    const types = { '1': 'word', '2': 'link', '3': 'competitor' }
+    if (types[msg]) {
+      state.customerStates[jid].targetType = types[msg]
+      state.customerStates[jid].flow = 'awaiting_group_blacklist_value'
+      await safeSendMessage(sock, jid, { text: `💬 Digite o valor para Adicionar ou Remover da Blacklist (${types[msg]}):` })
+    }
+    return
+  }
+
+  if (sc.flow === 'awaiting_group_blacklist_value') {
+    const val = raw.trim()
+    const type = sc.targetType
+    const groupJid = sc.selectedGroupJid
+    const current = getBlacklist(groupJid, type)
+    if (current.includes(val)) {
+      removeBlacklistItem(groupJid, type, val)
+      await safeSendMessage(sock, jid, { text: `✅ Removido da blacklist: ${val}` })
+    } else {
+      addBlacklistItem(groupJid, type, val)
+      await safeSendMessage(sock, jid, { text: `✅ Adicionado à blacklist: ${val}` })
+    }
+    state.customerStates[jid].flow = 'menu_group_dashboard'
+    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, groupJid) })
+    return
   }
 
   if (sc.flow === 'awaiting_group_id') {
