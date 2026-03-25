@@ -44,46 +44,16 @@ async function sendStickerFromMessage(sock, targetJid, sourceMsg, quotedKey) {
 
 // ─── Owner Menu ───
 
-function ownerPrivateMenu(config) {
+function ownerPrivateMenu() {
   return (
     `🤖✨ *Mahito — Sistema de Controle*\n\n` +
-    `━━━━━━━━━━━━━━━━━━\n` +
-    `👑 *Painel do Dono*\n` +
-    `━━━━━━━━━━━━━━━━━━\n\n` +
-    `menu - abrir este menu\n` +
-    `status - status geral\n\n` +
-    `👤 *Usuários*\n` +
-    `whitelist add 55XXXXXXXXXXX\n` +
-    `whitelist rm 55XXXXXXXXXXX\n\n` +
-    `👥 *Grupos*\n` +
-    `grupo add 123@g.us\n` +
-    `grupo rm 123@g.us\n` +
-    `grupo list\n\n` +
-    `💬 *Mensagens*\n` +
-    `dm           → privado passo-a-passo\n` +
-    `dm 5511... msg → atalho direto\n` +
-    `comunicado   → assistente global\n\n` +
-    `🚫 *Proteção*\n` +
-    `banword add texto\n` +
-    `banword rm texto\n` +
-    `competidor add nome\n` +
-    `competidor rm nome\n\n` +
-    `🔗 *Links Permitidos*\n` +
-    `domain add youtube.com\n` +
-    `domain rm youtube.com\n\n` +
-    `⏰ *Automação*\n` +
-    `agenda add grupo@g.us|09:30|Bom dia!\n` +
-    `agenda list\n` +
-    `agenda rm ID\n\n` +
-    `🎭 *Mahito*\n` +
-    `foto perfil  → envie imagem\n` +
-    `mahito teste → figurinha\n\n` +
-    `⚙️ *Sistema*\n` +
-    `apagar conversas → deleta todos os DMs (exceto Dono)\n` +
-    `limpar conversas → limpa as msgs de todos os Chats e Grupos\n` +
-    `reiniciar → reinicia o bot\n` +
-    `atualizar → git pull + restart\n\n` +
-    `━━━━━━━━━━━━━━━━━━`
+    `Escolha uma categoria (digite o número):\n\n` +
+    `1️⃣ *Controle de Usuários* (Whitelist/Blacklist)\n` +
+    `2️⃣ *Gerenciar Grupos* (Add/Remover/Lista)\n` +
+    `3️⃣ *Mensagens Globais e DMs*\n` +
+    `4️⃣ *Proteção* (Palavras e Concorrentes)\n` +
+    `5️⃣ *Configurações do Sistema* (Reiniciar, Atualizar, Limpar Chats)\n` +
+    `0️⃣ *Sair do Menu*`
   )
 }
 
@@ -187,6 +157,8 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
           delete: true,
           lastMessages: [{ key: { remoteJid: k.jid, id: k.msg_id, fromMe: Boolean(k.from_me) }, messageTimestamp: Math.floor(k.timestamp / 1000) }]
         }, k.jid)
+        const d = require('./db').getDB()
+        d.prepare('DELETE FROM chat_history_keys WHERE jid = ?').run(k.jid)
         count++
         await sleep(300)
       } catch (err) { logLocal(`Erro apagar ${k.jid}: ${err.message}`) }
@@ -203,9 +175,11 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     for (const k of keys) {
       try {
         await sock.chatModify({
-          clear: true,
+          clear: 'all',
           lastMessages: [{ key: { remoteJid: k.jid, id: k.msg_id, fromMe: Boolean(k.from_me) }, messageTimestamp: Math.floor(k.timestamp / 1000) }]
         }, k.jid)
+        const d = require('./db').getDB()
+        d.prepare('DELETE FROM chat_history_keys WHERE jid = ?').run(k.jid)
         count++
         await sleep(300)
       } catch (err) { logLocal(`Erro limpar ${k.jid}: ${err.message}`) }
@@ -215,8 +189,152 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
   }
 
   if (['menu', 'oi', 'ola', 'olá'].includes(msg)) {
-    await safeSendMessage(sock, jid, { text: ownerPrivateMenu(config) })
+    state.customerStates[jid] = { open: true, flow: 'owner_menu' }
+    await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
     return
+  }
+
+  // ─── Owner Interactive Menu ───
+  const sc = state.customerStates[jid] || {}
+
+  if (sc.flow === 'owner_menu') {
+    if (msg === '0' || msg === 'cancelar') {
+      delete state.customerStates[jid].flow
+      await safeSendMessage(sock, jid, { text: '✅ Menu finalizado. Podes me chamar digitando "menu" a qualquer hora.' })
+      return
+    }
+
+    if (msg === '1') {
+      state.customerStates[jid].flow = 'menu_users'
+      await safeSendMessage(sock, jid, { text: `*Controle de Usuários*\n\n1️⃣ Adicionar Whitelist\n2️⃣ Remover Whitelist\n0️⃣ Voltar` })
+      return
+    }
+    if (msg === '2') {
+      state.customerStates[jid].flow = 'menu_groups'
+      await safeSendMessage(sock, jid, { text: `*Gerenciar Grupos*\n\n1️⃣ Adicionar Grupo (Permitir Bot)\n2️⃣ Remover Grupo\n3️⃣ Listar Meus Grupos\n0️⃣ Voltar` })
+      return
+    }
+    if (msg === '3') {
+      state.customerStates[jid].flow = 'menu_msgs'
+      await safeSendMessage(sock, jid, { text: `*Mensagens Globais*\n\n1️⃣ Enviar DM Privada (Assistente)\n2️⃣ Enviar Comunicado Global (Assistente)\n0️⃣ Voltar` })
+      return
+    }
+    if (msg === '4') {
+      state.customerStates[jid].flow = 'menu_sec'
+      await safeSendMessage(sock, jid, { text: `*Proteção*\n\n1️⃣ Add Palavra Proibida\n2️⃣ Rm Palavra Proibida\n3️⃣ Add Concorrente\n4️⃣ Rm Concorrente\n0️⃣ Voltar` })
+      return
+    }
+    if (msg === '5') {
+      state.customerStates[jid].flow = 'menu_sys'
+      await safeSendMessage(sock, jid, { text: `*Sistema*\n\n1️⃣ Reiniciar Bot\n2️⃣ Atualizar do GitHub\n3️⃣ Apagar meus DMs (Mantém grupos)\n4️⃣ Limpar Mensagens de Tudo\n0️⃣ Voltar` })
+      return
+    }
+  }
+
+  // Menu Handling logic: Users
+  if (sc.flow === 'menu_users') {
+    if (msg === '1' || msg === '2') {
+      state.customerStates[jid].action = msg === '1' ? 'wl_add' : 'wl_rm'
+      state.customerStates[jid].flow = 'awaiting_number'
+      await safeSendMessage(sock, jid, { text: '💬 Digite o número (Ex: 5511999999999):' })
+      return
+    }
+    if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
+  }
+
+  if (sc.flow === 'awaiting_number') {
+    const out = onlyDigits(msg)
+    if (sc.action === 'wl_add') { addWhitelistDB(out); await safeSendMessage(sock, jid, { text: `✅ ${out} na whitelist.` }) }
+    if (sc.action === 'wl_rm') { removeWhitelistDB(out); await safeSendMessage(sock, jid, { text: `✅ ${out} removido da whitelist.` }) }
+    state.customerStates[jid].flow = 'owner_menu'
+    await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
+    return
+  }
+
+  // Menu Handling logic: Groups
+  if (sc.flow === 'menu_groups') {
+    if (msg === '1' || msg === '2') {
+      state.customerStates[jid].action = msg === '1' ? 'grp_add' : 'grp_rm'
+      state.customerStates[jid].flow = 'awaiting_group_id'
+      await safeSendMessage(sock, jid, { text: '💬 Digite o ID do Grupo (ex: 123@g.us):\n(Dica: Use a opção 3 para ver os IDs)' })
+      return
+    }
+    if (msg === '3') {
+      const chats = await sock.groupFetchAllParticipating()
+      const botJid = getBaseJid(sock.user.id)
+      const lines = []
+      for (const [gJid, meta] of Object.entries(chats)) {
+        const isAdmin = meta.participants?.some(p => getBaseJid(p.id) === botJid && !!p.admin)
+        lines.push(`*${meta.subject || 'Grupo'}*\nID: ${gJid}\nStatus: ${isAdmin ? 'Admin ✅' : 'Membro ❌'}\n`)
+      }
+      await safeSendMessage(sock, jid, { text: lines.length ? `📊 *Meus Grupos*\n\n${lines.join('\n')}` : 'Nenhum grupo encontrado.' })
+      state.customerStates[jid].flow = 'owner_menu'
+      await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
+      return
+    }
+    if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
+  }
+
+  if (sc.flow === 'awaiting_group_id') {
+    const id = raw.trim()
+    if (sc.action === 'grp_add') { addAllowedGroupDB(id); await safeSendMessage(sock, jid, { text: `✅ Grupo adicionado: ${id}` }) }
+    if (sc.action === 'grp_rm') { removeAllowedGroupDB(id); await safeSendMessage(sock, jid, { text: `✅ Grupo removido: ${id}` }) }
+    state.customerStates[jid].flow = 'owner_menu'
+    await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
+    return
+  }
+
+  // Menu Handling logic: Messages
+  if (sc.flow === 'menu_msgs') {
+    if (msg === '1') {
+      state.customerStates[jid].flow = 'dm_number'
+      await safeSendMessage(sock, jid, { text: '👤 Para qual número você quer enviar a mensagem?\n(Ex: 5511999999999)' })
+      return
+    }
+    if (msg === '2') {
+      state.customerStates[jid].flow = 'comunicado_text'
+      await safeSendMessage(sock, jid, { text: '📝 O que você deseja enviar no comunicado global?' })
+      return
+    }
+    if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
+  }
+
+  // Menu Handling logic: Sec
+  if (sc.flow === 'menu_sec') {
+    if (['1', '2', '3', '4'].includes(msg)) {
+      state.customerStates[jid].action = `sec_${msg}`
+      state.customerStates[jid].flow = 'awaiting_sec_word'
+      await safeSendMessage(sock, jid, { text: '💬 Digite a palavra / nome do concorrente:' })
+      return
+    }
+    if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
+  }
+
+  if (sc.flow === 'awaiting_sec_word') {
+    const word = raw.trim()
+    if (sc.action === 'sec_1') { config.instantBanWords.push(word); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Ban word: ${word}` }) }
+    if (sc.action === 'sec_2') { config.instantBanWords = config.instantBanWords.filter(w => normalize(w) !== normalize(word)); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Removida: ${word}` }) }
+    if (sc.action === 'sec_3') { config.competitorNames.push(word); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Concorrente: ${word}` }) }
+    if (sc.action === 'sec_4') { config.competitorNames = config.competitorNames.filter(w => normalize(w) !== normalize(word)); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Removido: ${word}` }) }
+    state.customerStates[jid].flow = 'owner_menu'
+    await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
+    return
+  }
+
+  // Menu Handling logic: System
+  if (sc.flow === 'menu_sys') {
+    if (msg === '1') { await restartBotProcess(sock, jid); return }
+    if (msg === '2') { await updateBotProcess(sock, jid); return }
+    if (msg === '3') {
+      state.customerStates[jid].flow = 'owner_menu'
+      // Call the manual handler
+      return processOwnerPrivate(sock, jid, 'apagar conversas', msgObj)
+    }
+    if (msg === '4') {
+      state.customerStates[jid].flow = 'owner_menu'
+      return processOwnerPrivate(sock, jid, 'limpar conversas', msgObj)
+    }
+    if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
   }
 
   if (msg === 'status') {
@@ -248,9 +366,7 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     return
   }
 
-  const sc = state.customerStates[jid] || {}
-
-  if (sc.flow === 'comunicado_text') {
+  if (sc.flow === 'comunicado_text' && msg !== '0' && msg !== 'cancelar') {
     state.customerStates[jid].comunicadoText = msgObj?.message?.conversation || msgObj?.message?.extendedTextMessage?.text || raw
     state.customerStates[jid].flow = 'comunicado_group'
     
@@ -298,16 +414,18 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     delete state.customerStates[jid].flow
     delete state.customerStates[jid].comunicadoText
     delete state.customerStates[jid].comunicadoGroups
+    state.customerStates[jid].flow = 'owner_menu'
+    await safeSendMessage(sock, jid, { text: '\n' + ownerPrivateMenu() })
     return
   }
   
   if (msg === 'comunicado') {
     state.customerStates[jid] = { ...(state.customerStates[jid] || {}), flow: 'comunicado_text' }
-    await safeSendMessage(sock, jid, { text: '📝 O que você deseja enviar no comunicado?' })
+    await safeSendMessage(sock, jid, { text: '📝 O que você deseja enviar no comunicado global?' })
     return
   }
 
-  if (sc.flow === 'dm_number') {
+  if (sc.flow === 'dm_number' && msg !== '0' && msg !== 'cancelar') {
     const rawNumber = onlyDigits(msgObj?.message?.conversation || msgObj?.message?.extendedTextMessage?.text || raw)
     if (!rawNumber || rawNumber.length < 10) {
       await safeSendMessage(sock, jid, { text: '❌ Número inválido. Operação cancelada.' })
@@ -334,6 +452,8 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     }
     delete state.customerStates[jid].flow
     delete state.customerStates[jid].dmTarget
+    state.customerStates[jid].flow = 'owner_menu'
+    await safeSendMessage(sock, jid, { text: '\n' + ownerPrivateMenu() })
     return
   }
   
@@ -343,56 +463,11 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     return
   }
 
+  // As a fallback for manual commands
   const [first, second, ...rest] = raw.split(' ')
   const lf = normalize(first)
   const ls = normalize(second)
   const tail = rest.join(' ').trim()
-
-  if (lf === 'whitelist' && ls === 'add') { addWhitelistDB(onlyDigits(tail)); await safeSendMessage(sock, jid, { text: `✅ ${tail} na whitelist.` }); return }
-  if (lf === 'whitelist' && (ls === 'rm' || ls === 'remove')) { removeWhitelistDB(onlyDigits(tail)); await safeSendMessage(sock, jid, { text: `✅ ${tail} removido.` }); return }
-  if (lf === 'grupo' && ls === 'add') { addAllowedGroupDB(tail); await safeSendMessage(sock, jid, { text: `✅ Grupo: ${tail}` }); return }
-  if (lf === 'grupo' && (ls === 'rm' || ls === 'remove')) { removeAllowedGroupDB(tail); await safeSendMessage(sock, jid, { text: `✅ Grupo removido: ${tail}` }); return }
-  if (lf === 'grupo' && ls === 'list') {
-    const chats = await sock.groupFetchAllParticipating()
-    const botJid = getBaseJid(sock.user.id)
-    const lines = []
-    for (const [gJid, meta] of Object.entries(chats)) {
-      const isAdmin = meta.participants?.some(p => getBaseJid(p.id) === botJid && !!p.admin)
-      lines.push(`*${meta.subject || 'Grupo'}*\nID: ${gJid}\nStatus: ${isAdmin ? 'Admin ✅' : 'Membro ❌'}\n`)
-    }
-    await safeSendMessage(sock, jid, { text: lines.length ? `📊 *Meus Grupos*\n\n${lines.join('\n')}` : 'Nenhum grupo encontrado.' })
-    return
-  }
-
-  if (lf === 'banword' && ls === 'add') { config.instantBanWords.push(tail); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Ban word: ${tail}` }); return }
-  if (lf === 'banword' && (ls === 'rm' || ls === 'remove')) { config.instantBanWords = config.instantBanWords.filter(w => normalize(w) !== normalize(tail)); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Removida: ${tail}` }); return }
-  if (lf === 'competidor' && ls === 'add') { config.competitorNames.push(tail); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Competidor: ${tail}` }); return }
-  if (lf === 'competidor' && (ls === 'rm' || ls === 'remove')) { config.competitorNames = config.competitorNames.filter(w => normalize(w) !== normalize(tail)); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Removido: ${tail}` }); return }
-  if (lf === 'domain' && ls === 'add') { config.lightDomains.push(tail); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Domínio leve: ${tail}` }); return }
-  if (lf === 'domain' && (ls === 'rm' || ls === 'remove')) { config.lightDomains = config.lightDomains.filter(w => normalize(w) !== normalize(tail)); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Removido: ${tail}` }); return }
-
-  if (lf === 'agenda' && ls === 'add') {
-    const payload = raw.slice(raw.toLowerCase().indexOf('add') + 3).trim()
-    const parts = payload.split('|')
-    if (parts.length < 3) { await safeSendMessage(sock, jid, { text: 'Use: agenda add grupo@g.us|09:30|Msg' }); return }
-    const [gJid, time, ...mp] = parts
-    const id = addSchedule(gJid.trim(), time.trim(), mp.join('|').trim())
-    await safeSendMessage(sock, jid, { text: `✅ Agendamento ID ${id}` })
-    scheduleAllMessages(sock)
-    return
-  }
-  if (lf === 'agenda' && ls === 'list') {
-    const s = getSchedules()
-    const textOut = s.length ? s.map(x => `ID:${x.id} | ${x.group_id} | ${x.time} | ${x.message}`).join('\n') : 'Nenhum.'
-    await safeSendMessage(sock, jid, { text: textOut })
-    return
-  }
-  if (lf === 'agenda' && (ls === 'rm' || ls === 'remove')) {
-    removeSchedule(Number(tail))
-    await safeSendMessage(sock, jid, { text: `✅ Removido.` })
-    scheduleAllMessages(sock)
-    return
-  }
 
   if (lf === 'dm' && second) {
     const rawNumber = onlyDigits(second)
@@ -407,9 +482,6 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     }
     return
   }
-
-  if (msg === 'reiniciar' || msg === 'reboot') { await restartBotProcess(sock, jid); return }
-  if (msg === 'atualizar' || msg === 'update') { await updateBotProcess(sock, jid); return }
 
   await safeSendMessage(sock, jid, { text: 'Comando não reconhecido. Envie *menu*.' })
 }
