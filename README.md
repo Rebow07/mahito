@@ -16,10 +16,23 @@ Mahito Ã© um bot focado em moderaÃ§Ã£o, ranking, whitelist, blacklist, ant
 
 ### [25/03/2026] - v3.1.1
 - **Expansão do Menu Numérico:** Inclusão das categorias perdidas (Links Permitidos, Automação e Identidade Mahito) no novo Menu de Dono Interativo. Todas as opções agora operam com o fluxo de perguntas passo-a-passo.
+### [25/03/2026] - v3.1.2
+- **Terminal Estilizado (Boot Premium):** Adicionada tela de boas-vindas em Arte ASCII e barra de carregamento animada na cor verde para o terminal Node.
+- **Correção Crítica na Troca de Foto:** Resolvido o problema onde o bot ignorava imagens enviadas pelo dono se não houvesse texto na legenda ou se o chat estivesse com mensagens temporárias.
+
+### [25/03/2026] - v3.1.3
+- **Controle Granular por Grupo (Upgrade Major):** Agora o Mahito permite que cada grupo tenha sua própria "personalidade" via menu numérico.
+- **Dashboard de Grupo:** Novo menu interativo para listar e abrir um painel de controle individual para cada grupo autorizado.
 
 ### [25/03/2026] - v3.1.4
-- **Dashboard de Grupo Ultra-Geral:** Expansão massiva do painel de controle individual por grupo.
-- **Configuração de XP:** Agora você pode ativar ou desativar o ganho de XP e níveis de forma independente em cada grupo.
-- **Mensagens de Saída Customizadas:** Adicionado suporte para habilitar/desabilitar avisos de quem sai do grupo e definir frases personalizadas por grupo.
-- **Gestão de Admins do Bot:** Novo menu de "Gerenciar Permissões" dentro do dashboard para listar, promover ou rebaixar VIPs e Moderadores (níveis 1 e 2) diretamente pelo painel.
-- **Reset de Permissões:** Opção de limpar todos os cargos de um grupo específico com um clique.
+- **Dashboard de Grupo Ultra-Geral:** Expansão massiva com controles de XP, Mensagens de Saída customizadas e Gestão de Admins/Permissões diretamente pelo menu.
+- **Reset de Permissões:** Opção de limpar todos os cargos (VIP/MOD) de um grupo específico.
+
+---
+
+## 🍓 Rodando no Raspberry Pi 3
+O Mahito Bot foi otimizado para hardware limitado:
+- **Banco de Dados:** SQLite configurado em modo `WAL` e `Normal Synchronous` para poupar vida útil do cartão SD.
+- **Memória:** Sincronização de histórico desativada para manter o uso de RAM abaixo de 300MB.
+- **Dica:** Ative o **Swap Memory** (pelo menos 1GB) no seu Linux da Raspy para evitar que o Node.js feche por falta de memória.
+- **Libvips:** Caso as figurinhas (stickers) não abram, instale manualmente: `sudo apt-get install libvips-dev`.

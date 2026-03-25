@@ -10,6 +10,7 @@ function getDB() {
   if (!db) {
     db = new Database(DB_PATH)
     db.pragma('journal_mode = WAL')
+    db.pragma('synchronous = NORMAL')
     db.pragma('foreign_keys = ON')
     initTables()
   }
