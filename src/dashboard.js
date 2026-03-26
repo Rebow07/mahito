@@ -63,31 +63,16 @@ function startDashboard(sock) {
       try {
         const meta = await sockRef.groupMetadata(groupId)
         const participants = (meta?.participants || []).map(p => {
-          // WhatsApp may use LID JIDs — try multiple fields to find phone number
-          const rawId = String(p.id || '')
-          const isLid = rawId.includes('@lid')
-          let phoneNumber = ''
-          
-          if (!isLid && rawId.includes('@s.whatsapp.net')) {
-            phoneNumber = rawId.split('@')[0].split(':')[0]
-          } else if (p.number) {
-            phoneNumber = String(p.number)
-          } else if (p.lid && !String(p.lid).includes('@lid')) {
-            phoneNumber = String(p.lid).split('@')[0].split(':')[0]
-          } else {
-            phoneNumber = rawId.split('@')[0].split(':')[0]
-          }
-
-          // Format as phone: add +55 prefix display if looks like BR number
-          const displayNumber = phoneNumber.length > 10 ? phoneNumber : phoneNumber
+          // p.jid has the real phone number, p.id has the LID
+          const phoneJid = p.jid || p.id || ''
+          const phoneNumber = String(phoneJid).split('@')[0].split(':')[0]
 
           return {
-            number: displayNumber,
-            jid: p.id,
+            number: phoneNumber,
+            jid: phoneJid,
             name: p.notify || p.verifiedName || p.name || '',
             isAdmin: p.admin === 'admin' || p.admin === 'superadmin',
-            role: p.admin === 'superadmin' ? 'Dono' : p.admin === 'admin' ? 'Admin' : 'Membro',
-            isLid
+            role: p.admin === 'superadmin' ? 'Dono' : p.admin === 'admin' ? 'Admin' : 'Membro'
           }
         })
         return sendJSON(res, {
@@ -136,8 +121,10 @@ function startDashboard(sock) {
       try {
         const meta = await sockRef.groupMetadata(groupId)
         const csv = 'Numero,Nome,Cargo\n' + (meta?.participants || []).map(p => {
+          const phoneJid = p.jid || p.id || ''
+          const num = String(phoneJid).split('@')[0].split(':')[0]
           const role = p.admin === 'superadmin' ? 'Dono' : p.admin === 'admin' ? 'Admin' : 'Membro'
-          return `${jidToNumber(p.id)},${(p.notify || '').replace(/,/g, '')},${role}`
+          return `${num},${(p.notify || '').replace(/,/g, '')},${role}`
         }).join('\n')
         res.writeHead(200, {
           'Content-Type': 'text/csv; charset=utf-8',
