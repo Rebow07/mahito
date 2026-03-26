@@ -62,13 +62,34 @@ function startDashboard(sock) {
       if (!groupId) return sendJSON(res, [])
       try {
         const meta = await sockRef.groupMetadata(groupId)
-        const participants = (meta?.participants || []).map(p => ({
-          number: jidToNumber(p.id),
-          jid: p.id,
-          name: p.notify || '',
-          isAdmin: p.admin === 'admin' || p.admin === 'superadmin',
-          role: p.admin === 'superadmin' ? 'Dono' : p.admin === 'admin' ? 'Admin' : 'Membro'
-        }))
+        const participants = (meta?.participants || []).map(p => {
+          // WhatsApp may use LID JIDs — try multiple fields to find phone number
+          const rawId = String(p.id || '')
+          const isLid = rawId.includes('@lid')
+          let phoneNumber = ''
+          
+          if (!isLid && rawId.includes('@s.whatsapp.net')) {
+            phoneNumber = rawId.split('@')[0].split(':')[0]
+          } else if (p.number) {
+            phoneNumber = String(p.number)
+          } else if (p.lid && !String(p.lid).includes('@lid')) {
+            phoneNumber = String(p.lid).split('@')[0].split(':')[0]
+          } else {
+            phoneNumber = rawId.split('@')[0].split(':')[0]
+          }
+
+          // Format as phone: add +55 prefix display if looks like BR number
+          const displayNumber = phoneNumber.length > 10 ? phoneNumber : phoneNumber
+
+          return {
+            number: displayNumber,
+            jid: p.id,
+            name: p.notify || p.verifiedName || p.name || '',
+            isAdmin: p.admin === 'admin' || p.admin === 'superadmin',
+            role: p.admin === 'superadmin' ? 'Dono' : p.admin === 'admin' ? 'Admin' : 'Membro',
+            isLid
+          }
+        })
         return sendJSON(res, {
           groupName: meta?.subject || groupId,
           desc: meta?.desc || '',
@@ -79,6 +100,26 @@ function startDashboard(sock) {
       } catch (err) {
         return sendJSON(res, { error: err.message, members: [] })
       }
+    }
+
+    // Debug endpoint to see raw participant data (temporary)
+    if (parsed.pathname === '/api/debug') {
+      const groupId = parsed.query.group
+      if (!groupId) return sendJSON(res, { error: 'no group' })
+      try {
+        const meta = await sockRef.groupMetadata(groupId)
+        const sample = (meta?.participants || []).slice(0, 3).map(p => ({
+          id: p.id,
+          lid: p.lid,
+          number: p.number,
+          notify: p.notify,
+          verifiedName: p.verifiedName,
+          name: p.name,
+          admin: p.admin,
+          allKeys: Object.keys(p)
+        }))
+        return sendJSON(res, { subject: meta?.subject, participantCount: meta?.participants?.length, sampleParticipants: sample })
+      } catch (err) { return sendJSON(res, { error: err.message }) }
     }
 
     if (parsed.pathname === '/api/ranking') {
