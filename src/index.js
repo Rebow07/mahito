@@ -126,6 +126,9 @@ async function connect() {
       state.botReady = true
       logLocal(`🟢 Bot pronto! Bot: ${config.phoneNumber} | Dono: ${config.ownerNumbers.join(', ')} | 🗄️ SQLite`)
       scheduleAllMessages(sock)
+      
+      // Start web dashboard
+      try { const { startDashboard } = require('./dashboard'); startDashboard(sock) } catch (err) { logLocal(`[DASHBOARD] Erro: ${err.message}`) }
 
       for (const ownerNumber of (config.ownerNumbers || [])) {
         const jid = `${ownerNumber}@s.whatsapp.net`
