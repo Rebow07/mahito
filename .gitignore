@@ -4,3 +4,6 @@ data/mahito.db
 logs/
 *.log
 .env
+data/nsfw_hashes/*
+!data/nsfw_hashes/.gitkeep
+backups/*.db
