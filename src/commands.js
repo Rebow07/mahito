@@ -925,7 +925,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
   if (cmd === '!idgrupo') { await safeSendMessage(sock, groupJid, { text: `🆔 ${groupJid}` }); return true }
 
   // ─── !se apresentar ───
-  if (normalize(commandText).startsWith('!se apresentar') || normalize(commandText).startsWith('!apresentar')) {
+  if (normalize(text).startsWith('!se apresentar') || normalize(text).startsWith('!apresentar')) {
     const gc = getGroupConfig(groupJid)
     const presentation = gc.presentation_text || (
       `😈 *Eu sou o Mahito* — o moderador oficial deste grupo.\n\n` +
