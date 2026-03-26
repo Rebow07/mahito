@@ -1,8 +1,21 @@
 const http = require('http')
+const os = require('os')
 const url = require('url')
 const { getDB, getAllowedGroups, getGroupConfig, getGroupRanking, getTotalUsers, getWeeklyStats } = require('./db')
 const { state } = require('./state')
 const { logLocal, getBaseJid, jidToNumber } = require('./utils')
+
+function getLocalIP() {
+  const interfaces = os.networkInterfaces()
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address
+      }
+    }
+  }
+  return 'localhost'
+}
 
 const PORT = 3000
 let serverInstance = null
@@ -93,8 +106,11 @@ function startDashboard(sock) {
     res.end('Not Found')
   })
 
-  serverInstance.listen(PORT, () => {
-    logLocal(`[DASHBOARD] 🌐 Painel disponível em http://localhost:${PORT}`)
+  serverInstance.listen(PORT, '0.0.0.0', () => {
+    const ip = getLocalIP()
+    logLocal(`[DASHBOARD] 🌐 Painel disponível em:`)
+    logLocal(`[DASHBOARD]    → Local:  http://localhost:${PORT}`)
+    logLocal(`[DASHBOARD]    → Rede:   http://${ip}:${PORT}`)
   })
 
   serverInstance.on('error', (err) => {
