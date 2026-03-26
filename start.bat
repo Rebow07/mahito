@@ -11,7 +11,7 @@ echo.
 
 node src/index.js
 
-if %errorlevel% equ 99 (
+if errorlevel 99 (
     echo.
     echo [!] Bot desligado via comando.
     pause
