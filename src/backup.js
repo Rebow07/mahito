@@ -57,12 +57,15 @@ function cleanOldBackups() {
 
 function commitAndPushBackup() {
   try {
-    // Auto-configure git identity (fixes fresh installs like Raspberry Pi)
+    // Auto-configure git (fixes fresh installs like Raspberry Pi)
     try { execSync('git config user.name "Mahito Bot"', { cwd: PATHS.ROOT, encoding: 'utf8' }) } catch {}
     try { execSync('git config user.email "mahito@bot.local"', { cwd: PATHS.ROOT, encoding: 'utf8' }) } catch {}
+    try { execSync('git config pull.rebase false', { cwd: PATHS.ROOT, encoding: 'utf8' }) } catch {}
     
     execSync('git add .', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 15000 })
     execSync('git commit -m "backup: auto-backup projeto completo + mahito.db"', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 15000 })
+    // Pull first to merge remote changes, then push
+    try { execSync('git pull --no-rebase', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 30000 }) } catch {}
     const pushOutput = execSync('git push', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 30000 })
     logLocal(`[BACKUP] ✅ Push realizado: ${pushOutput.trim()}`)
     return true

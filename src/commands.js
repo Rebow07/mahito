@@ -156,15 +156,18 @@ async function updateBotProcess(sock, jid) {
 
   const { execSync } = require('child_process')
   try {
+    // Auto-configure git to prevent divergent branch errors
+    try { execSync('git config pull.rebase false', { cwd: PATHS.ROOT, encoding: 'utf8' }) } catch {}
+    
     // Pull latest from GitHub
-    const pullOutput = execSync('git pull', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 30000 })
+    const pullOutput = execSync('git pull --no-rebase', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 30000 })
     await safeSendMessage(sock, jid, { text: `📦 Git pull:\n${pullOutput.trim()}` }, {}, 1500)
 
     // Install any new dependencies
-    const npmOutput = execSync('npm install --production', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 60000 })
+    const npmOutput = execSync('npm install --omit=dev', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 60000 })
     await safeSendMessage(sock, jid, { text: `✅ Dependências atualizadas. Reiniciando...` }, {}, 1500)
 
-    // Restart (start.bat will bring it back)
+    // Restart (start.bat/start.sh will bring it back)
     setTimeout(() => process.exit(0), 2000)
   } catch (err) {
     await safeSendMessage(sock, jid, { text: `❌ Erro na atualização:\n${err.message || err}` }, {}, 1500)
