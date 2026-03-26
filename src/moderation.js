@@ -53,7 +53,8 @@ function isWhitelisted(jid) {
 function groupIsAllowed(jid) {
   const groups = getAllowedGroups()
   if (!groups.length) return true
-  return groups.includes(jid)
+  const baseJid = getBaseJid(jid)
+  return groups.includes(baseJid)
 }
 
 function trackMessageForSpam(userJid, groupConfig) {
@@ -238,7 +239,8 @@ async function handleModeration(sock, msg) {
 
 async function handleGroupParticipantsUpdate(sock, update) {
   const globalConfig = loadConfig()
-  if (!groupIsAllowed(update.id)) return
+  const groupJid = getBaseJid(update.id)
+  if (!groupIsAllowed(groupJid)) return
 
   const groupConfig = getGroupConfig(update.id)
 

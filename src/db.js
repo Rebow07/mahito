@@ -1,6 +1,7 @@
 const Database = require('better-sqlite3')
 const path = require('path')
 const { PATHS } = require('./state')
+const { getBaseJid } = require('./utils')
 
 const DB_PATH = path.join(PATHS.DATA_DIR, 'mahito.db')
 
@@ -104,16 +105,18 @@ function initTables() {
 
 function getGroupConfig(groupId) {
   const d = getDB()
-  let row = d.prepare('SELECT * FROM groups_config WHERE group_id = ?').get(groupId)
+  const gid = getBaseJid(groupId)
+  let row = d.prepare('SELECT * FROM groups_config WHERE group_id = ?').get(gid)
   if (!row) {
-    d.prepare('INSERT OR IGNORE INTO groups_config (group_id) VALUES (?)').run(groupId)
-    row = d.prepare('SELECT * FROM groups_config WHERE group_id = ?').get(groupId)
+    d.prepare('INSERT OR IGNORE INTO groups_config (group_id) VALUES (?)').run(gid)
+    row = d.prepare('SELECT * FROM groups_config WHERE group_id = ?').get(gid)
   }
   return row
 }
 
 function setGroupConfig(groupId, key, value) {
   const d = getDB()
+  const gid = getBaseJid(groupId)
   const allowed = [
     'group_name', 'max_penalties', 'ignore_admins',
     'anti_link_enabled', 'anti_spam_enabled', 'anti_spam_max',
@@ -123,8 +126,8 @@ function setGroupConfig(groupId, key, value) {
     'xp_enabled', 'leave_text'
   ]
   if (!allowed.includes(key)) return false
-  d.prepare('INSERT OR IGNORE INTO groups_config (group_id) VALUES (?)').run(groupId)
-  d.prepare(`UPDATE groups_config SET ${key} = ? WHERE group_id = ?`).run(value, groupId)
+  d.prepare('INSERT OR IGNORE INTO groups_config (group_id) VALUES (?)').run(gid)
+  d.prepare(`UPDATE groups_config SET ${key} = ? WHERE group_id = ?`).run(value, gid)
   return true
 }
 
@@ -132,10 +135,12 @@ function setGroupConfig(groupId, key, value) {
 
 function getUserData(userId, groupId) {
   const d = getDB()
-  let row = d.prepare('SELECT * FROM users_data WHERE user_id = ? AND group_id = ?').get(userId, groupId)
+  const uid = getBaseJid(userId)
+  const gid = getBaseJid(groupId)
+  let row = d.prepare('SELECT * FROM users_data WHERE user_id = ? AND group_id = ?').get(uid, gid)
   if (!row) {
-    d.prepare('INSERT OR IGNORE INTO users_data (user_id, group_id) VALUES (?, ?)').run(userId, groupId)
-    row = d.prepare('SELECT * FROM users_data WHERE user_id = ? AND group_id = ?').get(userId, groupId)
+    d.prepare('INSERT OR IGNORE INTO users_data (user_id, group_id) VALUES (?, ?)').run(uid, gid)
+    row = d.prepare('SELECT * FROM users_data WHERE user_id = ? AND group_id = ?').get(uid, gid)
   }
   return row
 }
@@ -147,14 +152,18 @@ function getTotalUsers() {
 
 function addStrikeDB(userId, groupId) {
   const d = getDB()
-  d.prepare('INSERT OR IGNORE INTO users_data (user_id, group_id) VALUES (?, ?)').run(userId, groupId)
-  d.prepare('UPDATE users_data SET penalties = penalties + 1 WHERE user_id = ? AND group_id = ?').run(userId, groupId)
-  return getUserData(userId, groupId).penalties
+  const uid = getBaseJid(userId)
+  const gid = getBaseJid(groupId)
+  d.prepare('INSERT OR IGNORE INTO users_data (user_id, group_id) VALUES (?, ?)').run(uid, gid)
+  d.prepare('UPDATE users_data SET penalties = penalties + 1 WHERE user_id = ? AND group_id = ?').run(uid, gid)
+  return getUserData(uid, gid).penalties
 }
 
 function resetStrikesDB(userId, groupId) {
   const d = getDB()
-  d.prepare('UPDATE users_data SET penalties = 0 WHERE user_id = ? AND group_id = ?').run(userId, groupId)
+  const uid = getBaseJid(userId)
+  const gid = getBaseJid(groupId)
+  d.prepare('UPDATE users_data SET penalties = 0 WHERE user_id = ? AND group_id = ?').run(uid, gid)
 }
 
 function getPermLevel(userId, groupId) {
@@ -164,8 +173,10 @@ function getPermLevel(userId, groupId) {
 
 function setPermLevel(userId, groupId, level) {
   const d = getDB()
-  d.prepare('INSERT OR IGNORE INTO users_data (user_id, group_id) VALUES (?, ?)').run(userId, groupId)
-  d.prepare('UPDATE users_data SET perm_level = ? WHERE user_id = ? AND group_id = ?').run(level, userId, groupId)
+  const uid = getBaseJid(userId)
+  const gid = getBaseJid(groupId)
+  d.prepare('INSERT OR IGNORE INTO users_data (user_id, group_id) VALUES (?, ?)').run(uid, gid)
+  d.prepare('UPDATE users_data SET perm_level = ? WHERE user_id = ? AND group_id = ?').run(level, uid, gid)
 }
 
 // ─── XP / Levels ───
@@ -175,14 +186,16 @@ const XP_PER_LEVEL = 100
 
 function addXP(userId, groupId) {
   const d = getDB()
-  d.prepare('INSERT OR IGNORE INTO users_data (user_id, group_id) VALUES (?, ?)').run(userId, groupId)
-  d.prepare('UPDATE users_data SET xp = xp + ? WHERE user_id = ? AND group_id = ?').run(XP_PER_MESSAGE, userId, groupId)
-
-  const user = getUserData(userId, groupId)
+  const uid = getBaseJid(userId)
+  const gid = getBaseJid(groupId)
+  d.prepare('INSERT OR IGNORE INTO users_data (user_id, group_id) VALUES (?, ?)').run(uid, gid)
+  d.prepare('UPDATE users_data SET xp = xp + ? WHERE user_id = ? AND group_id = ?').run(XP_PER_MESSAGE, uid, gid)
+ 
+  const user = getUserData(uid, gid)
   const newLevel = Math.floor(user.xp / XP_PER_LEVEL)
-
+ 
   if (newLevel > user.level) {
-    d.prepare('UPDATE users_data SET level = ? WHERE user_id = ? AND group_id = ?').run(newLevel, userId, groupId)
+    d.prepare('UPDATE users_data SET level = ? WHERE user_id = ? AND group_id = ?').run(newLevel, uid, gid)
     return { leveledUp: true, newLevel, xp: user.xp }
   }
   return { leveledUp: false, newLevel: user.level, xp: user.xp }
@@ -190,27 +203,31 @@ function addXP(userId, groupId) {
 
 function getGroupRanking(groupId, limit = 10) {
   const d = getDB()
-  return d.prepare('SELECT * FROM users_data WHERE group_id = ? ORDER BY xp DESC LIMIT ?').all(groupId, limit)
+  const gid = getBaseJid(groupId)
+  return d.prepare('SELECT * FROM users_data WHERE group_id = ? ORDER BY xp DESC LIMIT ?').all(gid, limit)
 }
 
 // ─── Blacklists ───
 
 function getBlacklist(groupId, type) {
   const d = getDB()
-  return d.prepare('SELECT value FROM blacklists WHERE group_id = ? AND type = ?').all(groupId, type).map(r => r.value)
+  const gid = getBaseJid(groupId)
+  return d.prepare('SELECT value FROM blacklists WHERE group_id = ? AND type = ?').all(gid, type).map(r => r.value)
 }
 
 function addBlacklistItem(groupId, type, value) {
   const d = getDB()
+  const gid = getBaseJid(groupId)
   try {
-    d.prepare('INSERT INTO blacklists (group_id, type, value) VALUES (?, ?, ?)').run(groupId, type, value)
+    d.prepare('INSERT INTO blacklists (group_id, type, value) VALUES (?, ?, ?)').run(gid, type, value)
     return true
   } catch { return false }
 }
 
 function removeBlacklistItem(groupId, type, value) {
   const d = getDB()
-  d.prepare('DELETE FROM blacklists WHERE group_id = ? AND type = ? AND value = ?').run(groupId, type, value)
+  const gid = getBaseJid(groupId)
+  d.prepare('DELETE FROM blacklists WHERE group_id = ? AND type = ? AND value = ?').run(gid, type, value)
   return true
 }
 
@@ -228,7 +245,8 @@ function addWhitelistDB(userId) {
 
 function removeWhitelistDB(userId) {
   const d = getDB()
-  d.prepare('DELETE FROM whitelist WHERE user_id = ?').run(userId)
+  const uid = getBaseJid(userId)
+  d.prepare('DELETE FROM whitelist WHERE user_id = ?').run(uid)
   return true
 }
 
@@ -246,7 +264,8 @@ function addAllowedGroupDB(groupId) {
 
 function removeAllowedGroupDB(groupId) {
   const d = getDB()
-  d.prepare('DELETE FROM allowed_groups WHERE group_id = ?').run(groupId)
+  const gid = getBaseJid(groupId)
+  d.prepare('DELETE FROM allowed_groups WHERE group_id = ?').run(gid)
   return true
 }
 

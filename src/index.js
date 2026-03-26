@@ -10,7 +10,7 @@ const qrcode = require('qrcode-terminal')
 
 const { PATHS, state } = require('./state')
 const { ensureFiles } = require('./database')
-const { initTables, migrateFromJSON, addXP, getPermLevel, XP_PER_LEVEL, upsertChatKey } = require('./db')
+const { initTables, migrateFromJSON, addXP, getPermLevel, getGroupConfig, XP_PER_LEVEL, upsertChatKey } = require('./db')
 const { loadConfig, isOwner } = require('./config')
 const { logLocal, getText, getBaseJid, sleep, jidToNumber } = require('./utils')
 const { safeSendMessage } = require('./queue')
@@ -24,7 +24,7 @@ const {
 const { isAdmin } = require('./group')
 
 function rememberRecentMessage(msg, text) {
-  const groupJid = msg.key.remoteJid
+  const groupJid = getBaseJid(msg.key.remoteJid)
   if (!groupJid || !groupJid.endsWith('@g.us')) return
   if (msg.key.fromMe) return
 
@@ -155,7 +155,7 @@ async function connect() {
     const msg = messages?.[0]
     if (!msg || !msg.message) return
 
-    const remoteJid = msg.key.remoteJid
+    const remoteJid = getBaseJid(msg.key.remoteJid)
     const text = getText(msg.message)
 
     if (remoteJid && msg.key.id) {
