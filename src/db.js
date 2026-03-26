@@ -182,7 +182,10 @@ function setGroupConfig(groupId, key, value) {
     'anti_spam_interval', 'welcome_enabled', 'welcome_text',
     'leave_enabled', 'presentation_text', 'basic_commands_enabled',
     'anti_word_enabled', 'anti_competitor_enabled', 'ai_interactive_enabled',
-    'xp_enabled', 'leave_text'
+    'xp_enabled', 'leave_text',
+    'anti_flood_media', 'anti_flood_media_max', 'anti_flood_media_interval',
+    'slow_mode_seconds', 'anti_nsfw_enabled', 'auto_reply_enabled',
+    'achievements_enabled', 'alert_group_jid'
   ]
   if (!allowed.includes(key)) return false
   d.prepare('INSERT OR IGNORE INTO groups_config (group_id) VALUES (?)').run(gid)
