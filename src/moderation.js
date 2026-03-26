@@ -129,36 +129,94 @@ function getInstantBanReason(text, groupId, globalConfig, groupConfig) {
 }
 
 async function handleModeration(sock, msg) {
-  const globalConfig = loadConfig()
-  const groupJid = msg.key.remoteJid
-  const userJidRaw = msg.key.participant || msg.participant
-  const userJid = getBaseJid(userJidRaw)
-  const text = getText(msg.message)
+  try {
+    const globalConfig = loadConfig()
+    const groupJidRaw = msg.key.remoteJid
+    if (!groupJidRaw) return
+    const groupJid = getBaseJid(groupJidRaw)
+    
+    const userJidRaw = msg.key.participant || msg.participant
+    if (!userJidRaw) return
+    const userJid = getBaseJid(userJidRaw)
+    
+    const text = getText(msg.message)
 
-  if (!groupJid || !groupJid.endsWith('@g.us') || !userJid || !text) return
-  if (!groupIsAllowed(groupJid)) return
+    if (!groupJid.endsWith('@g.us') || !text) return
+    if (!groupIsAllowed(groupJid)) return
 
-  // Get per-group config from SQLite
-  const groupConfig = getGroupConfig(groupJid)
+    // Get per-group config from SQLite
+    const groupConfig = getGroupConfig(groupJid) || {}
 
-  // Check permission level — VIP+ bypass moderation
-  const permLevel = getPermLevel(userJid, groupJid)
-  if (permLevel >= 1) return
+    // Check permission level — VIP+ bypass moderation
+    const permLevel = getPermLevel(userJid, groupJid)
+    if (permLevel >= 1) return
 
-  const admin = await isAdmin(sock, groupJid, userJid)
-  if (groupConfig.ignore_admins && admin) return
+    const admin = await isAdmin(sock, groupJid, userJid)
+    if (groupConfig.ignore_admins && admin) return
 
-  const { isOwner } = require('./config')
-  if (isWhitelisted(userJid) || isOwner(userJid, globalConfig)) return
+    const { isOwner } = require('./config')
+    if (isWhitelisted(userJid) || isOwner(userJid, globalConfig)) return
 
-  const groupName = await getGroupName(sock, groupJid)
-  const userNumber = jidToNumber(userJid)
-  const pushName = msg.pushName || 'Sem Nome'
-  const userDisplay = `@${userNumber} (${pushName})`
-  const maxPenalties = groupConfig.max_penalties || 3
+    const groupName = await getGroupName(sock, groupJid)
+    const userNumber = jidToNumber(userJid)
+    const pushName = msg.pushName || 'Sem Nome'
+    const userDisplay = `@${userNumber} (${pushName})`
+    const maxPenalties = groupConfig.max_penalties || 3
 
-  // ─── Spam Detection ───
-  if (trackMessageForSpam(userJid, groupConfig)) {
+    // ─── Spam Detection ───
+    if (trackMessageForSpam(userJid, groupConfig)) {
+      await safeDelete(sock, groupJid, msg.key, userJid)
+
+      const now = Date.now()
+      const lastStrike = userStrikeLocks.get(userJid) || 0
+      if (now - lastStrike < 5000) return
+      userStrikeLocks.set(userJid, now)
+
+      const count = addStrikeDB(userJid, groupJid)
+      await sendStrikeWarning(sock, groupJid, userJid, count, maxPenalties, 'spam')
+      await sendDiscordLog(`⚠️ **SPAM DETECTADO**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}\n📊 Strikes: ${count}/${maxPenalties}`, globalConfig)
+
+      if (count >= maxPenalties) {
+        await safeRemove(sock, groupJid, userJid)
+        resetStrikesDB(userJid, groupJid)
+        await safeSendMessage(sock, groupJid, {
+          text: `💀 @${userNumber} caiu...\n\nMotivo: spam/excesso de mensagens\nHumanos que ignoram as regras sempre acabam assim.`,
+          mentions: [userJid]
+        }, {}, 800, true)
+        await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
+        await sendDiscordLog(`🚫 **BAN POR SPAM**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}`, globalConfig)
+      }
+      return
+    }
+
+    // ─── Instant Ban (bad words, links, competitors) ───
+    const instantReason = getInstantBanReason(text, groupJid, globalConfig, groupConfig)
+    if (instantReason) {
+      const reasonType = instantReason.split(':')[0]
+      await safeDelete(sock, groupJid, msg.key, userJid)
+      await safeRemove(sock, groupJid, userJid)
+      resetStrikesDB(userJid, groupJid)
+
+      const banPhrase = reasonType === 'palavra_grave'
+        ? strikePhrase('badword')
+        : reasonType === 'concorrente'
+          ? strikePhrase('competitor')
+          : 'Você realmente achou que isso passaria despercebido?'
+
+      await safeSendMessage(sock, groupJid, {
+        text: `💀 @${userNumber} caiu...\n\nMotivo: ${instantReason.split(':')[1] || 'violação grave'}\n${banPhrase}`,
+        mentions: [userJid]
+      }, {}, 800, true)
+      await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
+      await sendDiscordLog(`🚫 **BAN IMEDIATO**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}\n📌 Motivo: ${instantReason}`, globalConfig)
+      return
+    }
+
+    // ─── Link Detection ───
+    if (!groupConfig.anti_link_enabled) return
+    const urls = extractUrls(text)
+    if (!urls.length) return
+
     await safeDelete(sock, groupJid, msg.key, userJid)
 
     const now = Date.now()
@@ -167,75 +225,28 @@ async function handleModeration(sock, msg) {
     userStrikeLocks.set(userJid, now)
 
     const count = addStrikeDB(userJid, groupJid)
-    await sendStrikeWarning(sock, groupJid, userJid, count, maxPenalties, 'spam')
-    await sendDiscordLog(`⚠️ **SPAM DETECTADO**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}\n📊 Strikes: ${count}/${maxPenalties}`, globalConfig)
+    const allLight = urls.every(url => isLightLink(url, globalConfig))
+    const reason = allLight ? 'link_leve' : 'link'
+
+    await sendStrikeWarning(sock, groupJid, userJid, count, maxPenalties, reason)
+    await sendDiscordLog(`⚠️ **STRIKE**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}\n📌 Motivo: ${reason}\n📊 Strikes: ${count}/${maxPenalties}`, globalConfig)
 
     if (count >= maxPenalties) {
       await safeRemove(sock, groupJid, userJid)
       resetStrikesDB(userJid, groupJid)
       await safeSendMessage(sock, groupJid, {
-        text: `💀 @${userNumber} caiu...\n\nMotivo: spam/excesso de mensagens\nHumanos que ignoram as regras sempre acabam assim.`,
+        text: `💀 @${userNumber} foi removido.\n\nMotivo: Acúmulo de strikes (${reason})`,
         mentions: [userJid]
       }, {}, 800, true)
       await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
-      await sendDiscordLog(`🚫 **BAN POR SPAM**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}`, globalConfig)
+      await sendDiscordLog(`🚫 **BAN POR ACÚMULO**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}\n📌 ${reason}\n📊 Strikes: ${count}/${maxPenalties}`, globalConfig)
     }
-    return
-  }
 
-  // ─── Instant Ban (bad words, links, competitors) ───
-  const instantReason = getInstantBanReason(text, groupJid, globalConfig, groupConfig)
-  if (instantReason) {
-    const reasonType = instantReason.split(':')[0]
-    await safeDelete(sock, groupJid, msg.key, userJid)
-    await safeRemove(sock, groupJid, userJid)
-    resetStrikesDB(userJid, groupJid)
-
-    const banPhrase = reasonType === 'palavra_grave'
-      ? strikePhrase('badword')
-      : reasonType === 'concorrente'
-        ? strikePhrase('competitor')
-        : 'Você realmente achou que isso passaria despercebido?'
-
-    await safeSendMessage(sock, groupJid, {
-      text: `💀 @${userNumber} caiu...\n\nMotivo: ${instantReason.split(':')[1] || 'violação grave'}\n${banPhrase}`,
-      mentions: [userJid]
-    }, {}, 800, true)
-    await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
-    await sendDiscordLog(`🚫 **BAN IMEDIATO**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}\n📌 Motivo: ${instantReason}`, globalConfig)
-    return
-  }
-
-  // ─── Link Detection ───
-  if (!groupConfig.anti_link_enabled) return
-  const urls = extractUrls(text)
-  if (!urls.length) return
-
-  await safeDelete(sock, groupJid, msg.key, userJid)
-
-  const now = Date.now()
-  const lastStrike = userStrikeLocks.get(userJid) || 0
-  if (now - lastStrike < 5000) return
-  userStrikeLocks.set(userJid, now)
-
-  const count = addStrikeDB(userJid, groupJid)
-  const allLight = urls.every(url => isLightLink(url, globalConfig))
-  const reason = allLight ? 'link_leve' : 'link'
-
-  await sendStrikeWarning(sock, groupJid, userJid, count, maxPenalties, reason)
-  await sendDiscordLog(`⚠️ **STRIKE**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}\n📌 Motivo: ${reason}\n📊 Strikes: ${count}/${maxPenalties}`, globalConfig)
-
-  if (count >= maxPenalties) {
-    await safeRemove(sock, groupJid, userJid)
-    resetStrikesDB(userJid, groupJid)
-    await safeSendMessage(sock, groupJid, {
-      text: `💀 @${userNumber} foi removido.\n\nMotivo: Acúmulo de strikes (${reason})`,
-      mentions: [userJid]
-    }, {}, 800, true)
-    await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
-    await sendDiscordLog(`🚫 **BAN POR ACÚMULO**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}\n📌 ${reason}\n📊 Strikes: ${count}/${maxPenalties}`, globalConfig)
+  } catch (err) {
+    logLocal(`[ERROR] handleModeration: ${err.message}\n${err.stack}`)
   }
 }
+
 
 async function handleGroupParticipantsUpdate(sock, update) {
   const globalConfig = loadConfig()

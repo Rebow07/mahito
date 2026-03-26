@@ -152,94 +152,116 @@ async function connect() {
   })
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    const msg = messages?.[0]
-    if (!msg || !msg.message) return
+    try {
+      const msg = messages?.[0]
+      if (!msg || !msg.message) return
 
-    const remoteJid = getBaseJid(msg.key.remoteJid)
-    const text = getText(msg.message)
-    console.log(`[ENTRY] Mensagem recebida de ${remoteJid}: "${text.substring(0, 30)}..."`)
+      const remoteJid = getBaseJid(msg.key.remoteJid)
+      const text = getText(msg.message)
 
-    if (remoteJid && msg.key.id) {
-      upsertChatKey(
-        remoteJid,
-        msg.key.id,
-        msg.key.fromMe,
-        msg.messageTimestamp ? (typeof msg.messageTimestamp === 'number' ? msg.messageTimestamp * 1000 : Number(msg.messageTimestamp) * 1000) : Date.now(),
-        msg.key.participant || msg.participant || undefined
-      )
-    }
-
-    if (msg.key.fromMe) return
-
-    // Always cache group messages
-    if (remoteJid && text) {
-      rememberRecentMessage(msg, text)
-    }
-
-    // Only moderate real-time messages
-    if (!state.botReady) return
-    if (type !== 'notify') return
-
-    const msgTime = msg.messageTimestamp || Math.floor(Date.now() / 1000)
-    if (Math.floor(Date.now() / 1000) - msgTime > 60) return
-
-    const senderRaw = msg.key.participant || msg.participant || remoteJid
-    const senderJid = getBaseJid(senderRaw)
-    const currentConfig = loadConfig()
-
-    if (!remoteJid) return
- 
-    if (!remoteJid.endsWith('@g.us')) {
-      if (isOwner(senderJid, currentConfig)) {
-        await processOwnerPrivate(sock, senderJid, text, msg)
-      } else {
-        if (!text) return
-        await processCustomerPrivate(sock, senderJid, text)
+      if (remoteJid && msg.key.id) {
+        try {
+          upsertChatKey(
+            remoteJid,
+            msg.key.id,
+            msg.key.fromMe,
+            msg.messageTimestamp ? (typeof msg.messageTimestamp === 'number' ? msg.messageTimestamp * 1000 : Number(msg.messageTimestamp) * 1000) : Date.now(),
+            msg.key.participant || msg.participant || undefined
+          )
+        } catch (dbErr) {
+          logLocal(`[ERROR] Falha no upsertChatKey: ${dbErr.message}`)
+        }
       }
-      return
-    }
 
-    const { groupIsAllowed } = require('./moderation')
-    const allowed = groupIsAllowed(remoteJid)
-    if (!allowed) {
-      logLocal(`[DEBUG] Ignorando grupo não autorizado: ${remoteJid}`)
-      return
-    }
+      if (msg.key.fromMe) return
 
-    if (!text) return
-    logLocal(`[DEBUG] Mensagem em grupo autorizado (${remoteJid}): ${text.substring(0, 50)}`)
-
-    // ─── XP System ───
-    const groupConfig = getGroupConfig(remoteJid)
-    const permLevel = getPermLevel(senderJid, remoteJid)
-    if (groupConfig.xp_enabled && permLevel === 0 && text.length > 1) {
-      const result = addXP(senderJid, remoteJid)
-      if (result.leveledUp) {
-        await safeSendMessage(sock, remoteJid, {
-          text: `⭐ @${jidToNumber(senderJid)} subiu para o *Nível ${result.newLevel}*! 🎉\nXP total: ${result.xp}`,
-          mentions: [senderJid]
-        }, {}, 1500)
+      // Always cache group messages
+      if (remoteJid && text) {
+        rememberRecentMessage(msg, text)
       }
-    }
 
-    // Group Commands
-    const admin = await isAdmin(sock, remoteJid, senderJid)
-    const isBotOwner = isOwner(senderJid, currentConfig)
-    
-    logLocal(`[DEBUG] Processando comandos (Admin: ${admin}, Owner: ${isBotOwner})`)
-    const handled = await handleGroupCommands(sock, msg, text, remoteJid, senderJid, admin, isBotOwner)
-    if (handled) {
-       logLocal(`[DEBUG] Comando processado: ${text.split(' ')[0]}`)
-       return
-    }
+      // Only moderate real-time messages
+      if (!state.botReady) return
+      if (type !== 'notify') return
 
-    // Moderation
-    logLocal(`[DEBUG] Processando moderação`)
-    await handleModeration(sock, msg)
+      const msgTime = msg.messageTimestamp || Math.floor(Date.now() / 1000)
+      if (Math.floor(Date.now() / 1000) - msgTime > 60) return
+
+      const senderRaw = msg.key.participant || msg.participant || remoteJid
+      const senderJid = getBaseJid(senderRaw)
+      const currentConfig = loadConfig()
+
+      if (!remoteJid) return
+   
+      if (!remoteJid.endsWith('@g.us')) {
+        try {
+          if (isOwner(senderJid, currentConfig)) {
+            await processOwnerPrivate(sock, senderJid, text, msg)
+          } else {
+            if (!text) return
+            await processCustomerPrivate(sock, senderJid, text)
+          }
+        } catch (privErr) {
+          logLocal(`[ERROR] Falha ao processar mensagem privada: ${privErr.message}`)
+        }
+        return
+      }
+
+      const { groupIsAllowed } = require('./moderation')
+      const allowed = groupIsAllowed(remoteJid)
+      if (!allowed) {
+        return
+      }
+
+      if (!text) return
+
+      // ─── XP System ───
+      try {
+        const groupConfig = getGroupConfig(remoteJid)
+        if (groupConfig) {
+          const permLevel = getPermLevel(senderJid, remoteJid)
+          if (groupConfig.xp_enabled && permLevel === 0 && text.length > 1) {
+            const result = addXP(senderJid, remoteJid)
+            if (result.leveledUp) {
+              await safeSendMessage(sock, remoteJid, {
+                text: `⭐ @${jidToNumber(senderJid)} subiu para o *Nível ${result.newLevel}*! 🎉\nXP total: ${result.xp}`,
+                mentions: [senderJid]
+              }, {}, 1500)
+            }
+          }
+        }
+      } catch (xpErr) {
+        logLocal(`[ERROR] Falha no sistema de XP: ${xpErr.message}`)
+      }
+
+      // Group Commands
+      try {
+        const admin = await isAdmin(sock, remoteJid, senderJid)
+        const isBotOwner = isOwner(senderJid, currentConfig)
+        
+        const handled = await handleGroupCommands(sock, msg, text, remoteJid, senderJid, admin, isBotOwner)
+        if (handled) {
+           return
+        }
+      } catch (cmdErr) {
+        logLocal(`[ERROR] Falha nos comandos de grupo: ${cmdErr.message}`)
+      }
+
+      // Moderation
+      try {
+        await handleModeration(sock, msg)
+      } catch (modErr) {
+        logLocal(`[ERROR] Falha na moderação: ${modErr.message}`)
+      }
+
+    } catch (criticalErr) {
+       logLocal(`[CRITICAL] Falha crítica no pipeline de mensagem: ${criticalErr.message}\n${criticalErr.stack}`)
+    }
   })
 }
 
 process.on('uncaughtException', (err) => logLocal(`Uncaught Exception: ${err.message || err}`))
+process.on('unhandledRejection', (reason) => logLocal(`Unhandled Rejection: ${reason}`))
 process.on('unhandledRejection', (err) => logLocal(`Unhandled Rejection: ${err.message || err}`))
 
 connect().catch(err => {

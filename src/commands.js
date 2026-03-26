@@ -841,83 +841,86 @@ async function processCustomerPrivate(sock, jid, text) {
 // ─── Group Commands ───
 
 async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, isBotOwner) {
-  const parts = text.trim().split(' ')
-  const commandText = parts[0] ? parts[0].toLowerCase() : ''
-  const cmd = commandText
-  const config = loadConfig()
+  try {
+    const parts = text.trim().split(' ')
+    const cmd = parts[0] ? parts[0].toLowerCase() : ''
+    if (!cmd) return false
 
-  // ─── !fadm (Fechar Grupo) ───
-  if (cmd === '!fadm' || cmd === '!fechar') {
-    if (!admin && !isBotOwner) return true
-    try {
-      await sock.groupSettingUpdate(groupJid, 'announcement')
-      await safeSendMessage(sock, groupJid, { text: '🔒 Grupo fechado. Apenas administradores podem enviar mensagens.' })
-    } catch {
-      await safeSendMessage(sock, groupJid, { text: '❌ Erro: Certifique-se de que o bot é admin.' })
+    const config = loadConfig()
+    
+    // ─── !fadm / !fechar ───
+    if (cmd === '!fadm' || cmd === '!fechar') {
+      if (!admin && !isBotOwner) return true
+      try {
+        await sock.groupSettingUpdate(groupJid, 'announcement')
+        await safeSendMessage(sock, groupJid, { text: '🔒 Grupo fechado. Apenas administradores podem enviar mensagens.' })
+      } catch {
+        await safeSendMessage(sock, groupJid, { text: '❌ Erro: Certifique-se de que o bot é admin.' })
+      }
+      return true
     }
-    return true
-  }
 
-  // ─── !abrir (Abrir Grupo) ───
-  if (cmd === '!abrir') {
-    if (!admin && !isBotOwner) return true
-    try {
-      await sock.groupSettingUpdate(groupJid, 'not_announcement')
-      await safeSendMessage(sock, groupJid, { text: '🔓 Grupo aberto para todos os membros.' })
-    } catch {
-      await safeSendMessage(sock, groupJid, { text: '❌ Erro: Certifique-se de que o bot é admin.' })
+    // ─── !abrir ───
+    if (cmd === '!abrir') {
+      if (!admin && !isBotOwner) return true
+      try {
+        await sock.groupSettingUpdate(groupJid, 'not_announcement')
+        await safeSendMessage(sock, groupJid, { text: '🔓 Grupo aberto para todos os membros.' })
+      } catch {
+        await safeSendMessage(sock, groupJid, { text: '❌ Erro: Certifique-se de que o bot é admin.' })
+      }
+      return true
     }
-    return true
-  }
 
-  const gc = getGroupConfig(groupJid)
-  const isPrivileged = admin || isBotOwner || getPermLevel(userJid, groupJid) >= 1
+    const gc = getGroupConfig(groupJid) || {}
+    const isPrivileged = admin || isBotOwner || getPermLevel(userJid, groupJid) >= 1
 
-  const basicCommands = [
-    '!ping', '!regras', '!status', '!idgrupo', '!se apresentar', '!apresentar',
-    '!meurank', '!rank', '!nivel', '!ranking', '!top', '!comandos'
-  ]
-  const isBasic = basicCommands.includes(cmd)
+    const basicCommands = [
+      '!ping', '!regras', '!status', '!idgrupo', '!se apresentar', '!apresentar',
+      '!meurank', '!rank', '!nivel', '!ranking', '!top', '!comandos'
+    ]
+    const isBasic = basicCommands.includes(cmd)
 
-  // Non-privileged users cannot run admin commands
-  if (!isBasic && !isPrivileged) return false
-  
-  // Basic commands can be blocked via basic_commands_enabled (except for privileged users)
-  if (isBasic && !gc.basic_commands_enabled && !isPrivileged) return false
+    // Non-privileged users cannot run admin commands
+    if (!isBasic && !isPrivileged) return false
+    
+    // Basic commands can be blocked via basic_commands_enabled (except for privileged users)
+    const basicEnabled = gc.basic_commands_enabled !== undefined ? gc.basic_commands_enabled : 1
+    if (isBasic && !basicEnabled && !isPrivileged) return false
 
-  // ─── !habilitar e !desabilitar ───
-  if (cmd === '!habilitar') {
-    if (!isPrivileged) return true
-    setGroupConfig(groupJid, 'basic_commands_enabled', 1)
-    await safeSendMessage(sock, groupJid, { text: '✅ Comandos básicos (rank, regras, ping) liberados para todos os membros!' })
-    return true
-  }
+    // ─── !habilitar / !desabilitar ───
+    if (cmd === '!habilitar') {
+      if (!isPrivileged) return true
+      setGroupConfig(groupJid, 'basic_commands_enabled', 1)
+      await safeSendMessage(sock, groupJid, { text: '✅ Comandos básicos (rank, regras, ping) liberados para todos os membros!' })
+      return true
+    }
 
-  if (cmd === '!desabilitar') {
-    if (!isPrivileged) return true
-    setGroupConfig(groupJid, 'basic_commands_enabled', 0)
-    await safeSendMessage(sock, groupJid, { text: '❌ Comandos básicos agora são exclusivos para VIPs e Administração.' })
-    return true
-  }
+    if (cmd === '!desabilitar') {
+      if (!isPrivileged) return true
+      setGroupConfig(groupJid, 'basic_commands_enabled', 0)
+      await safeSendMessage(sock, groupJid, { text: '❌ Comandos básicos agora são exclusivos para VIPs e Administração.' })
+      return true
+    }
 
-  // ─── !comandos ───
-  if (cmd === '!comandos') {
-    await safeSendMessage(sock, groupJid, { text: `🤖 *Comandos Básicos do Mahito*\n\n• !meurank — Veja seu nível e XP\n• !ranking — Mostra o Top 10 mais ativos\n• !regras — Lê as regras do grupo\n• !se apresentar — Fala sobre o MU Elysian\n• !status — Mostra se o bot tá online\n• !ping — Pong!` })
-    return true
-  }
+    // ─── !comandos ───
+    if (cmd === '!comandos') {
+      await safeSendMessage(sock, groupJid, { text: `🤖 *Comandos Básicos do Mahito*\n\n• !meurank — Veja seu nível e XP\n• !ranking — Mostra o Top 10 mais ativos\n• !regras — Lê as regras do grupo\n• !se apresentar — Fala sobre o MU Elysian\n• !status — Mostra se o bot tá online\n• !ping — Pong!` })
+      return true
+    }
 
-  if (cmd === '!ping') { await safeSendMessage(sock, groupJid, { text: '🏓 Pong!' }); return true }
-  if (cmd === '!regras') { await safeSendMessage(sock, groupJid, { text: config.rulesText || 'Sem regras.' }); return true }
-  if (cmd === '!status') {
-    const { getTotalUsers } = require('./db')
-    await safeSendMessage(sock, groupJid, {
-      text: 
-        `🌑 真人 [ ᴍᴀʜɪᴛᴏ ᴍᴏᴅ ] 真人 🌑\n\n` +
-        `  🧬 Status: 𝑶𝒏𝒍𝒊𝒏𝒆\n\n` +
-        `  📊 Almas Processadas: [${getTotalUsers()}]`
-    })
-    return true
-  }
+    if (cmd === '!ping') { await safeSendMessage(sock, groupJid, { text: '🏓 Pong!' }); return true }
+    if (cmd === '!regras') { await safeSendMessage(sock, groupJid, { text: config.rulesText || 'Sem regras.' }); return true }
+    if (cmd === '!status') {
+      const { getTotalUsers } = require('./db')
+      await safeSendMessage(sock, groupJid, {
+        text: 
+          `🌑 真人 [ ᴍᴀʜɪᴛᴏ ᴍᴏᴅ ] 真人 🌑\n\n` +
+          `  🧬 Status: 𝑶𝒏𝒍𝒊𝒏𝒆\n\n` +
+          `  📊 Almas Processadas: [${getTotalUsers()}]`
+      })
+      return true
+    }
 
   if (cmd === '!idgrupo') { await safeSendMessage(sock, groupJid, { text: `🆔 ${groupJid}` }); return true }
 
@@ -1297,6 +1300,10 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
   }
 
   return false
+  } catch (err) {
+    logLocal(`[ERROR] handleGroupCommands: ${err.message}\n${err.stack}`)
+    return false
+  }
 }
 
 module.exports = {
