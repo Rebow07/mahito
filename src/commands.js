@@ -1072,7 +1072,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
   }
 
   // ─── !todos ───
-  if (cmd === '!todos' || normalize(commandText) === '@todos') {
+  if (cmd === '!todos' || cmd === '@todos') {
     const meta = await getGroupMeta(sock, groupJid)
     const people = (meta?.participants || []).map(p => p.id).filter(Boolean)
     const textMsg = parts.slice(1).join(' ') || 'Atenção, pessoal!'
