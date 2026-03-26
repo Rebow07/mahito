@@ -57,6 +57,10 @@ function cleanOldBackups() {
 
 function commitAndPushBackup() {
   try {
+    // Auto-configure git identity (fixes fresh installs like Raspberry Pi)
+    try { execSync('git config user.name "Mahito Bot"', { cwd: PATHS.ROOT, encoding: 'utf8' }) } catch {}
+    try { execSync('git config user.email "mahito@bot.local"', { cwd: PATHS.ROOT, encoding: 'utf8' }) } catch {}
+    
     execSync('git add .', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 15000 })
     execSync('git commit -m "backup: auto-backup projeto completo + mahito.db"', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 15000 })
     const pushOutput = execSync('git push', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 30000 })
