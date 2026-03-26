@@ -1142,8 +1142,35 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     }
 
     // ─── !comandos ───
-    if (cmd === '!comandos') {
-      await safeSendMessage(sock, groupJid, { text: `🤖 *Comandos Básicos do Mahito*\n\n• !meurank — Veja seu nível e XP\n• !ranking — Mostra o Top 10 mais ativos\n• !regras — Lê as regras do grupo\n• !se apresentar — Fala sobre o MU Elysian\n• !status — Mostra se o bot tá online\n• !ping — Pong!` })
+    if (cmd === '!comandos' || cmd === '!comando' || cmd === '!ajuda' || cmd === '!help') {
+      await safeSendMessage(sock, groupJid, { text:
+        `🤖 *Comandos do Mahito*\n\n` +
+        `📊 *Ranking & XP*\n` +
+        `• !meurank — Seu nível e XP\n` +
+        `• !ranking — Top 10 mais ativos\n` +
+        `• !hierarquia — VIPs, Mods e Donos\n\n` +
+        `👤 *Perfil & Conquistas*\n` +
+        `• !perfil — Seu card completo\n` +
+        `• !perfil @user — Card de outra pessoa\n` +
+        `• !conquistas — Suas conquistas\n\n` +
+        `🛡️ *Moderação (Admins)*\n` +
+        `• !ban @user — Expulsar membro\n` +
+        `• !aviso @user — Dar strike\n` +
+        `• !reset @user — Zerar strikes\n` +
+        `• !limpar [N] — Apagar últimas N msgs\n` +
+        `• !varrerlinks — Apagar todas os links\n` +
+        `• !inativos [dias] — Listar fantasmas\n\n` +
+        `🎨 *Diversão*\n` +
+        `• !s — Criar figurinha de imagem\n` +
+        `• !mahito — Figurinha do Mahito\n` +
+        `• !sorteio — Sortear membro aleatório\n` +
+        `• !todos [msg] — Marcar todos\n\n` +
+        `📋 *Info*\n` +
+        `• !regras — Regras do grupo\n` +
+        `• !status — Status do bot\n` +
+        `• !ping — Pong!\n` +
+        `• !idgrupo — ID do grupo`
+      })
       return true
     }
 
