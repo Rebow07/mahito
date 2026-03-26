@@ -1575,10 +1575,19 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     const firstSeen = data.first_seen ? new Date(data.first_seen).toLocaleDateString('pt-BR') : 'Desconhecido'
     const lastMsg = data.last_message_at ? new Date(data.last_message_at).toLocaleDateString('pt-BR') : 'Nunca'
     
+    // Auto-detect role: Owner > Admin > DB perm_level
+    const { isOwner } = require('./config')
+    const targetIsOwner = isOwner(targetJid, config)
+    const targetIsAdmin = await isAdmin(sock, groupJid, targetJid)
+    let cargo = levels[data.perm_level] || 'Membro'
+    if (targetIsOwner) cargo = '👑 Dono'
+    else if (targetIsAdmin) cargo = '🛡️ Admin'
+    else if (data.perm_level >= 1) cargo = levels[data.perm_level]
+    
     const card =
       `┌──────────────────────┐\n` +
       `│  👤 @${jidToNumber(targetJid)}\n` +
-      `│  🎖️ Cargo: ${levels[data.perm_level] || 'Membro'}\n` +
+      `│  🎖️ Cargo: ${cargo}\n` +
       `│  ⭐ XP: ${data.xp}\n` +
       `│  📈 Nível: ${data.level}\n` +
       `│  🏆 Conquistas: ${achievementCount}/${TOTAL_ACHIEVEMENTS}\n` +
