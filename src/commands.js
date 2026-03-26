@@ -45,8 +45,13 @@ async function sendStickerFromMessage(sock, targetJid, sourceMsg, quotedKey) {
 // ─── Owner Menu ───
 
 function ownerPrivateMenu() {
+  const { getTotalUsers } = require('./db')
+  const almas = getTotalUsers()
+  
   return (
     `🤖✨ *Mahito — Sistema de Controle*\n\n` +
+    `  🧬 Status: 𝑶𝒏𝒍𝒊𝒏𝒆\n` +
+    `  📊 Almas Processadas: [${almas}]\n\n` +
     `Escolha uma categoria (digite o número):\n\n` +
     `1️⃣ *Controle de Usuários* (Whitelist/Blacklist)\n` +
     `2️⃣ *Gerenciar Grupos* (Add/Remover/Dashboard)\n` +
