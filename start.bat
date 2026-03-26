@@ -11,6 +11,13 @@ echo.
 
 node src/index.js
 
+if %errorlevel% equ 99 (
+    echo.
+    echo [!] Bot desligado via comando.
+    pause
+    exit
+)
+
 echo.
 echo [!] Bot encerrou. Reiniciando em 3 segundos...
 echo     (Pressione Ctrl+C para parar de vez)

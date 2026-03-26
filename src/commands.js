@@ -666,7 +666,7 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     if (msg === '5') {
       await safeSendMessage(sock, jid, { text: '⏻ Desligando sistema Mahito...' })
       await sleep(1000)
-      process.exit(0)
+      process.exit(99)
     }
     if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
   }

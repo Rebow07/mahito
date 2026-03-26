@@ -187,7 +187,7 @@ async function connect() {
     const currentConfig = loadConfig()
 
     if (!remoteJid) return
-
+ 
     if (!remoteJid.endsWith('@g.us')) {
       if (isOwner(senderJid, currentConfig)) {
         await processOwnerPrivate(sock, senderJid, text, msg)
@@ -197,6 +197,9 @@ async function connect() {
       }
       return
     }
+
+    const { groupIsAllowed } = require('./moderation')
+    if (!groupIsAllowed(remoteJid)) return
 
     if (!text) return
 
