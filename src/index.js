@@ -23,6 +23,8 @@ const {
 } = require('./commands')
 const { isAdmin } = require('./group')
 const { checkAndUnlockAchievements, formatAchievementNotification } = require('./achievements')
+const { checkNSFW } = require('./nsfw')
+const { downloadMediaMessage } = require('@whiskeysockets/baileys')
 
 function rememberRecentMessage(msg, text) {
   const groupJid = getBaseJid(msg.key.remoteJid)
@@ -220,6 +222,36 @@ async function connect() {
         incrementWeeklyStat(remoteJid, 'total_messages')
       } catch (trackErr) {
         logLocal(`[ERROR] Activity tracking: ${trackErr.message}`)
+      }
+
+      // ─── Anti-NSFW Check (runs on image messages) ───
+      try {
+        const groupConfig = getGroupConfig(remoteJid)
+        const imageMsg = msg.message?.imageMessage || msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage
+        if (groupConfig && groupConfig.anti_nsfw_enabled && imageMsg) {
+          const permLevel = getPermLevel(senderJid, remoteJid)
+          if (permLevel === 0) {
+            const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger: P({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage })
+            const result = await checkNSFW(buffer)
+            if (result.match) {
+              logLocal(`[NSFW] Imagem bloqueada de ${senderJid} no grupo ${remoteJid} (${result.similarity}% - ${result.matchedFile})`)
+              try { await sock.sendMessage(remoteJid, { delete: msg.key }) } catch {}
+              const { addStrikeDB } = require('./db')
+              const { sendStrikeWarning } = require('./moderation')
+              const count = addStrikeDB(senderJid, remoteJid)
+              await sendStrikeWarning(sock, remoteJid, senderJid, count, groupConfig.max_penalties, 'conteúdo proibido (NSFW)')
+              if (count >= groupConfig.max_penalties) {
+                const { safeRemove } = require('./queue')
+                const { resetStrikesDB } = require('./db')
+                await safeRemove(sock, remoteJid, senderJid)
+                resetStrikesDB(senderJid, remoteJid)
+              }
+              return
+            }
+          }
+        }
+      } catch (nsfwErr) {
+        logLocal(`[ERROR] Anti-NSFW: ${nsfwErr.message}`)
       }
 
       if (!text) return
