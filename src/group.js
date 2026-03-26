@@ -11,7 +11,9 @@ async function getGroupMeta(sock, groupJid, forceRefresh = false) {
   }
 
   try {
+    console.log(`[GROUP] Buscando metadata para ${groupJid}...`)
     const meta = await sock.groupMetadata(groupJid)
+    console.log(`[GROUP] Metadata recebida para ${groupJid}`)
     state.groupMetaCache.set(groupJid, { data: meta, timestamp: now })
     return meta
   } catch (err) {

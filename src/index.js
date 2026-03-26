@@ -157,6 +157,7 @@ async function connect() {
 
     const remoteJid = getBaseJid(msg.key.remoteJid)
     const text = getText(msg.message)
+    console.log(`[ENTRY] Mensagem recebida de ${remoteJid}: "${text.substring(0, 30)}..."`)
 
     if (remoteJid && msg.key.id) {
       upsertChatKey(
@@ -199,9 +200,14 @@ async function connect() {
     }
 
     const { groupIsAllowed } = require('./moderation')
-    if (!groupIsAllowed(remoteJid)) return
+    const allowed = groupIsAllowed(remoteJid)
+    if (!allowed) {
+      logLocal(`[DEBUG] Ignorando grupo não autorizado: ${remoteJid}`)
+      return
+    }
 
     if (!text) return
+    logLocal(`[DEBUG] Mensagem em grupo autorizado (${remoteJid}): ${text.substring(0, 50)}`)
 
     // ─── XP System ───
     const groupConfig = getGroupConfig(remoteJid)
@@ -219,10 +225,16 @@ async function connect() {
     // Group Commands
     const admin = await isAdmin(sock, remoteJid, senderJid)
     const isBotOwner = isOwner(senderJid, currentConfig)
+    
+    logLocal(`[DEBUG] Processando comandos (Admin: ${admin}, Owner: ${isBotOwner})`)
     const handled = await handleGroupCommands(sock, msg, text, remoteJid, senderJid, admin, isBotOwner)
-    if (handled) return
+    if (handled) {
+       logLocal(`[DEBUG] Comando processado: ${text.split(' ')[0]}`)
+       return
+    }
 
     // Moderation
+    logLocal(`[DEBUG] Processando moderação`)
     await handleModeration(sock, msg)
   })
 }
