@@ -153,6 +153,46 @@ function startDashboard(sock) {
       return
     }
 
+    // ─── Admin API endpoints (remote system management) ───
+    if (parsed.pathname === '/api/admin/gitfix') {
+      try {
+        const { execSync } = require('child_process')
+        const results = []
+        try { execSync('git config pull.rebase false', { cwd: PATHS.ROOT, encoding: 'utf8' }); results.push('✅ pull.rebase = false') } catch (e) { results.push('❌ ' + e.message) }
+        try { execSync('git config user.name "Mahito Bot"', { cwd: PATHS.ROOT, encoding: 'utf8' }); results.push('✅ user.name configurado') } catch (e) { results.push('❌ ' + e.message) }
+        try { execSync('git config user.email "mahito@bot.local"', { cwd: PATHS.ROOT, encoding: 'utf8' }); results.push('✅ user.email configurado') } catch (e) { results.push('❌ ' + e.message) }
+        try { const o = execSync('git pull --no-rebase', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 30000 }); results.push('✅ git pull: ' + o.trim()) } catch (e) { results.push('⚠️ git pull: ' + e.message.substring(0, 200)) }
+        return sendJSON(res, { success: true, results })
+      } catch (err) { return sendJSON(res, { success: false, error: err.message }) }
+    }
+
+    if (parsed.pathname === '/api/admin/update') {
+      try {
+        const { execSync } = require('child_process')
+        execSync('git config pull.rebase false', { cwd: PATHS.ROOT, encoding: 'utf8' })
+        const pull = execSync('git pull --no-rebase', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 30000 })
+        const npm = execSync('npm install --omit=dev', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 60000 })
+        sendJSON(res, { success: true, pull: pull.trim(), message: 'Reiniciando em 3s...' })
+        setTimeout(() => process.exit(0), 3000)
+      } catch (err) { return sendJSON(res, { success: false, error: err.message }) }
+      return
+    }
+
+    if (parsed.pathname === '/api/admin/ssh') {
+      try {
+        const { execSync } = require('child_process')
+        execSync('sudo systemctl enable ssh', { encoding: 'utf8', timeout: 5000 })
+        execSync('sudo systemctl start ssh', { encoding: 'utf8', timeout: 5000 })
+        return sendJSON(res, { success: true, message: 'SSH ativado!' })
+      } catch (err) { return sendJSON(res, { success: false, error: err.message }) }
+    }
+
+    if (parsed.pathname === '/api/admin/restart') {
+      sendJSON(res, { success: true, message: 'Reiniciando...' })
+      setTimeout(() => process.exit(0), 2000)
+      return
+    }
+
     if (parsed.pathname === '/' || parsed.pathname === '/index.html') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
       res.end(getHTML())
