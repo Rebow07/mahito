@@ -296,7 +296,7 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     }
     if (msg === '7') {
       state.customerStates[jid].flow = 'menu_mahito'
-      await safeSendMessage(sock, jid, { text: `*Identidade Mahito*\n\n1️⃣ Mudar Foto de Perfil\n2️⃣ Enviar Figurinha Mahito\n0️⃣ Voltar` })
+      await safeSendMessage(sock, jid, { text: `*Identidade Mahito*\n\n1️⃣ Mudar Foto de Perfil\n2️⃣ Enviar Figurinha Mahito\n3️⃣ Adicionar Figurinha (enviar + categoria)\n4️⃣ Listar Figurinhas Salvas\n5️⃣ Remover Figurinha\n0️⃣ Voltar` })
       return
     }
     if (msg === '8') {
@@ -751,15 +751,117 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
   // Menu Handling logic: Mahito
   if (sc.flow === 'menu_mahito') {
     if (msg === '1') {
-      state.customerStates[jid].flow = 'owner_menu' // Volta ao menu quando acabar
-      // Call the manual foto perfil handler
+      state.customerStates[jid].flow = 'owner_menu'
       return processOwnerPrivate(sock, jid, 'foto perfil', msgObj)
     }
     if (msg === '2') {
       state.customerStates[jid].flow = 'owner_menu'
       return processOwnerPrivate(sock, jid, 'mahito teste', msgObj)
     }
+    if (msg === '3') {
+      state.customerStates[jid].flow = 'awaiting_sticker_upload'
+      await safeSendMessage(sock, jid, { text: '🎨 Envie a figurinha (sticker) ou GIF que deseja adicionar.' })
+      return
+    }
+    if (msg === '4') {
+      const { listAllStickers } = require('./db')
+      const all = listAllStickers()
+      if (!all.length) {
+        await safeSendMessage(sock, jid, { text: '📭 Nenhuma figurinha cadastrada no banco.' })
+      } else {
+        const grouped = {}
+        for (const s of all) {
+          if (!grouped[s.category]) grouped[s.category] = []
+          grouped[s.category].push(s.filename)
+        }
+        const lines = Object.entries(grouped).map(([cat, files]) => 
+          `*${cat}* (${files.length}):\n${files.map(f => `  • ${f}`).join('\n')}`
+        )
+        await safeSendMessage(sock, jid, { text: `🎨 *Figurinhas Salvas*\n\n${lines.join('\n\n')}` })
+      }
+      return
+    }
+    if (msg === '5') {
+      state.customerStates[jid].flow = 'awaiting_sticker_remove'
+      await safeSendMessage(sock, jid, { text: '💬 Digite o nome do arquivo da figurinha a remover (Ex: mahito_ban_001.webp):' })
+      return
+    }
     if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
+  }
+
+  // ─── Sticker Upload Flow ───
+  if (sc.flow === 'awaiting_sticker_upload') {
+    const stickerMsg = msgObj?.message?.stickerMessage || msgObj?.message?.imageMessage || msgObj?.message?.videoMessage
+    if (stickerMsg) {
+      try {
+        const buffer = await downloadMediaMessage(msgObj, 'buffer', {}, { logger: P({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage })
+        // Save to temp, will name properly after category
+        state.customerStates[jid].stickerBuffer = buffer
+        state.customerStates[jid].flow = 'awaiting_sticker_category'
+        await safeSendMessage(sock, jid, { text: '✅ Figurinha recebida!\n\n💬 Agora digite a CATEGORIA (Ex: feliz, nervoso, ban, fun, strike, detect, mute):' })
+      } catch (err) {
+        await safeSendMessage(sock, jid, { text: `❌ Erro ao baixar mídia: ${err.message}` })
+        state.customerStates[jid].flow = 'menu_mahito'
+      }
+    } else {
+      await safeSendMessage(sock, jid, { text: '❌ Envie uma figurinha, imagem ou GIF.' })
+    }
+    return
+  }
+
+  if (sc.flow === 'awaiting_sticker_category') {
+    const category = raw.trim().toLowerCase().replace(/[^a-z0-9_]/g, '')
+    if (!category) {
+      await safeSendMessage(sock, jid, { text: '❌ Categoria inválida. Use apenas letras e números.' })
+      return
+    }
+    const buffer = sc.stickerBuffer
+    if (!buffer) {
+      await safeSendMessage(sock, jid, { text: '❌ Figurinha perdida. Tente novamente.' })
+      state.customerStates[jid].flow = 'menu_mahito'
+      return
+    }
+
+    try {
+      // Convert to WebP for consistency
+      const webp = await sharp(buffer, { animated: true })
+        .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        .webp({ quality: 60 })
+        .toBuffer()
+
+      const timestamp = Date.now()
+      const filename = `mahito_${category}_${timestamp}.webp`
+      const filePath = path.join(PATHS.STICKERS_DIR, filename)
+      fs.writeFileSync(filePath, webp)
+
+      const { addStickerDB } = require('./db')
+      const ok = addStickerDB(filename, category)
+
+      if (ok) {
+        await safeSendMessage(sock, jid, { text: `✅ *Figurinha salva!*\n\n📁 Arquivo: ${filename}\n🏷️ Categoria: ${category}\n\nAgora o Mahito vai usar essa figurinha automaticamente quando reagir com a emoção "${category}"!` })
+      } else {
+        await safeSendMessage(sock, jid, { text: '❌ Erro ao salvar no banco (arquivo duplicado?).' })
+      }
+    } catch (err) {
+      await safeSendMessage(sock, jid, { text: `❌ Erro ao processar figurinha: ${err.message}` })
+    }
+
+    delete state.customerStates[jid].stickerBuffer
+    state.customerStates[jid].flow = 'menu_mahito'
+    await safeSendMessage(sock, jid, { text: `*Identidade Mahito*\n\n1️⃣ Mudar Foto de Perfil\n2️⃣ Enviar Figurinha Mahito\n3️⃣ Adicionar Figurinha (enviar + categoria)\n4️⃣ Listar Figurinhas Salvas\n5️⃣ Remover Figurinha\n0️⃣ Voltar` })
+    return
+  }
+
+  if (sc.flow === 'awaiting_sticker_remove') {
+    const filename = raw.trim()
+    const filePath = path.join(PATHS.STICKERS_DIR, filename)
+    const { removeStickerDB } = require('./db')
+    removeStickerDB(filename)
+    try { fs.unlinkSync(filePath) } catch {}
+    await safeSendMessage(sock, jid, { text: `✅ Figurinha removida: ${filename}` })
+    state.customerStates[jid].flow = 'menu_mahito'
+    await safeSendMessage(sock, jid, { text: `*Identidade Mahito*\n\n1️⃣ Mudar Foto de Perfil\n2️⃣ Enviar Figurinha Mahito\n3️⃣ Adicionar Figurinha (enviar + categoria)\n4️⃣ Listar Figurinhas Salvas\n5️⃣ Remover Figurinha\n0️⃣ Voltar` })
+    return
   }
 
   // Menu Handling logic: System

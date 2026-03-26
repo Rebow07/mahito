@@ -125,6 +125,13 @@ function initTables() {
       most_active_user TEXT DEFAULT '',
       UNIQUE(group_id, week_start)
     );
+
+    CREATE TABLE IF NOT EXISTS stickers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      filename TEXT NOT NULL UNIQUE,
+      category TEXT NOT NULL,
+      added_at INTEGER NOT NULL
+    );
   `)
 
   // ─── Migrations (safe for existing DBs) ───
@@ -500,6 +507,32 @@ function getInactiveMembers(groupId, daysSince) {
   return d.prepare('SELECT * FROM users_data WHERE group_id = ? AND last_message_at > 0 AND last_message_at < ? ORDER BY last_message_at ASC').all(gid, cutoff)
 }
 
+// ─── Stickers (Dynamic Categories) ───
+
+function getStickersByCategory(category) {
+  const d = getDB()
+  return d.prepare('SELECT * FROM stickers WHERE category = ?').all(category.toLowerCase())
+}
+
+function addStickerDB(filename, category) {
+  const d = getDB()
+  try {
+    d.prepare('INSERT INTO stickers (filename, category, added_at) VALUES (?, ?, ?)').run(filename, category.toLowerCase(), Date.now())
+    return true
+  } catch { return false }
+}
+
+function removeStickerDB(filename) {
+  const d = getDB()
+  d.prepare('DELETE FROM stickers WHERE filename = ?').run(filename)
+  return true
+}
+
+function listAllStickers() {
+  const d = getDB()
+  return d.prepare('SELECT * FROM stickers ORDER BY category, id').all()
+}
+
 module.exports = {
   getDB,
   initTables,
@@ -541,5 +574,9 @@ module.exports = {
   getWeeklyStats,
   getWeekStart,
   trackUserActivity,
-  getInactiveMembers
+  getInactiveMembers,
+  getStickersByCategory,
+  addStickerDB,
+  removeStickerDB,
+  listAllStickers
 }

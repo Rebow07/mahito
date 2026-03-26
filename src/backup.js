@@ -57,8 +57,8 @@ function cleanOldBackups() {
 
 function commitAndPushBackup() {
   try {
-    execSync('git add backups/', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 15000 })
-    execSync('git commit -m "backup: auto-backup mahito.db"', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 15000 })
+    execSync('git add .', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 15000 })
+    execSync('git commit -m "backup: auto-backup projeto completo + mahito.db"', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 15000 })
     const pushOutput = execSync('git push', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 30000 })
     logLocal(`[BACKUP] ✅ Push realizado: ${pushOutput.trim()}`)
     return true
