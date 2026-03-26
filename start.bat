@@ -3,6 +3,7 @@ title Mahito Bot
 color 0A
 
 :loop
+cls
 echo.
 echo ========================================
 echo   MAHITO BOT - Iniciando...
