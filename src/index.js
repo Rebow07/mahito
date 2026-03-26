@@ -10,7 +10,7 @@ const qrcode = require('qrcode-terminal')
 
 const { PATHS, state } = require('./state')
 const { ensureFiles } = require('./database')
-const { initTables, migrateFromJSON, addXP, getPermLevel, getGroupConfig, XP_PER_LEVEL, upsertChatKey } = require('./db')
+const { initTables, migrateFromJSON, addXP, getPermLevel, getGroupConfig, XP_PER_LEVEL, upsertChatKey, trackUserActivity, incrementWeeklyStat, getAutoReplies } = require('./db')
 const { loadConfig, isOwner } = require('./config')
 const { logLocal, getText, getBaseJid, sleep, jidToNumber } = require('./utils')
 const { safeSendMessage } = require('./queue')
@@ -22,6 +22,7 @@ const {
   scheduleAllMessages
 } = require('./commands')
 const { isAdmin } = require('./group')
+const { checkAndUnlockAchievements, formatAchievementNotification } = require('./achievements')
 
 function rememberRecentMessage(msg, text) {
   const groupJid = getBaseJid(msg.key.remoteJid)
@@ -213,7 +214,37 @@ async function connect() {
         return
       }
 
+      // ─── Activity Tracking (runs on ALL messages, including non-text) ───
+      try {
+        trackUserActivity(senderJid, remoteJid)
+        incrementWeeklyStat(remoteJid, 'total_messages')
+      } catch (trackErr) {
+        logLocal(`[ERROR] Activity tracking: ${trackErr.message}`)
+      }
+
       if (!text) return
+
+      // ─── Slow Mode Check ───
+      try {
+        const groupConfig = getGroupConfig(remoteJid)
+        if (groupConfig && groupConfig.slow_mode_seconds > 0) {
+          const permLevel = getPermLevel(senderJid, remoteJid)
+          const admin = await isAdmin(sock, remoteJid, senderJid)
+          if (permLevel === 0 && !admin && !isOwner(senderJid, currentConfig)) {
+            const key = `slow:${senderJid}:${remoteJid}`
+            const lastSent = state.slowModeTracker?.get(key) || 0
+            const now = Date.now()
+            if (now - lastSent < groupConfig.slow_mode_seconds * 1000) {
+              try { await sock.sendMessage(remoteJid, { delete: msg.key }) } catch {}
+              return
+            }
+            if (!state.slowModeTracker) state.slowModeTracker = new Map()
+            state.slowModeTracker.set(key, now)
+          }
+        }
+      } catch (slowErr) {
+        logLocal(`[ERROR] Slow mode: ${slowErr.message}`)
+      }
 
       // ─── XP System ───
       try {
@@ -229,9 +260,40 @@ async function connect() {
               }, {}, 1500)
             }
           }
+
+          // ─── Achievements Check ───
+          if (groupConfig.achievements_enabled) {
+            const newAchievements = checkAndUnlockAchievements(senderJid, remoteJid)
+            for (const key of newAchievements) {
+              const notification = formatAchievementNotification(key)
+              if (notification) {
+                await safeSendMessage(sock, remoteJid, {
+                  text: `@${jidToNumber(senderJid)} ${notification}`,
+                  mentions: [senderJid]
+                }, {}, 2000)
+              }
+            }
+          }
         }
       } catch (xpErr) {
-        logLocal(`[ERROR] Falha no sistema de XP: ${xpErr.message}`)
+        logLocal(`[ERROR] Falha no sistema de XP/Achievements: ${xpErr.message}`)
+      }
+
+      // ─── Auto-Reply System ───
+      try {
+        const groupConfig = getGroupConfig(remoteJid)
+        if (groupConfig && groupConfig.auto_reply_enabled) {
+          const replies = getAutoReplies(remoteJid)
+          const lowerText = text.toLowerCase()
+          for (const reply of replies) {
+            if (lowerText.includes(reply.trigger_word)) {
+              await safeSendMessage(sock, remoteJid, { text: reply.response }, {}, 1500)
+              break
+            }
+          }
+        }
+      } catch (arErr) {
+        logLocal(`[ERROR] Auto-reply: ${arErr.message}`)
       }
 
       // Group Commands

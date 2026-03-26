@@ -40,7 +40,15 @@ function initTables() {
       anti_competitor_enabled INTEGER DEFAULT 1,
       ai_interactive_enabled INTEGER DEFAULT 1,
       xp_enabled INTEGER DEFAULT 1,
-      leave_text TEXT DEFAULT '☹️ @user não aguentou e abandonou o Mahito.'
+      leave_text TEXT DEFAULT '☹️ @user não aguentou e abandonou o Mahito.',
+      anti_flood_media INTEGER DEFAULT 0,
+      anti_flood_media_max INTEGER DEFAULT 8,
+      anti_flood_media_interval INTEGER DEFAULT 60,
+      slow_mode_seconds INTEGER DEFAULT 0,
+      anti_nsfw_enabled INTEGER DEFAULT 0,
+      auto_reply_enabled INTEGER DEFAULT 1,
+      achievements_enabled INTEGER DEFAULT 1,
+      alert_group_jid TEXT DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS users_data (
@@ -50,6 +58,9 @@ function initTables() {
       level INTEGER DEFAULT 0,
       penalties INTEGER DEFAULT 0,
       perm_level INTEGER DEFAULT 0,
+      first_seen INTEGER DEFAULT 0,
+      last_message_at INTEGER DEFAULT 0,
+      total_messages INTEGER DEFAULT 0,
       PRIMARY KEY (user_id, group_id)
     );
 
@@ -84,21 +95,62 @@ function initTables() {
       timestamp INTEGER,
       participant TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS auto_replies (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id TEXT NOT NULL,
+      trigger_word TEXT NOT NULL,
+      response TEXT NOT NULL,
+      UNIQUE(group_id, trigger_word)
+    );
+
+    CREATE TABLE IF NOT EXISTS achievements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      group_id TEXT NOT NULL,
+      achievement_key TEXT NOT NULL,
+      unlocked_at INTEGER NOT NULL,
+      UNIQUE(user_id, group_id, achievement_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS weekly_stats (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id TEXT NOT NULL,
+      week_start INTEGER NOT NULL,
+      total_messages INTEGER DEFAULT 0,
+      members_joined INTEGER DEFAULT 0,
+      members_left INTEGER DEFAULT 0,
+      strikes_given INTEGER DEFAULT 0,
+      bans_given INTEGER DEFAULT 0,
+      most_active_user TEXT DEFAULT '',
+      UNIQUE(group_id, week_start)
+    );
   `)
 
-  try {
-    d.exec('ALTER TABLE groups_config ADD COLUMN basic_commands_enabled INTEGER DEFAULT 1')
-  } catch {}
-
-  try {
-    d.exec('ALTER TABLE chat_history_keys ADD COLUMN participant TEXT')
-  } catch {}
-
-  try { d.exec('ALTER TABLE groups_config ADD COLUMN anti_word_enabled INTEGER DEFAULT 1') } catch {}
-  try { d.exec('ALTER TABLE groups_config ADD COLUMN anti_competitor_enabled INTEGER DEFAULT 1') } catch {}
-  try { d.exec('ALTER TABLE groups_config ADD COLUMN ai_interactive_enabled INTEGER DEFAULT 1') } catch {}
-  try { d.exec('ALTER TABLE groups_config ADD COLUMN xp_enabled INTEGER DEFAULT 1') } catch {}
-  try { d.exec("ALTER TABLE groups_config ADD COLUMN leave_text TEXT DEFAULT '☹️ @user não aguentou e abandonou o Mahito.'") } catch {}
+  // ─── Migrations (safe for existing DBs) ───
+  const migrations = [
+    'ALTER TABLE groups_config ADD COLUMN basic_commands_enabled INTEGER DEFAULT 1',
+    'ALTER TABLE chat_history_keys ADD COLUMN participant TEXT',
+    'ALTER TABLE groups_config ADD COLUMN anti_word_enabled INTEGER DEFAULT 1',
+    'ALTER TABLE groups_config ADD COLUMN anti_competitor_enabled INTEGER DEFAULT 1',
+    'ALTER TABLE groups_config ADD COLUMN ai_interactive_enabled INTEGER DEFAULT 1',
+    'ALTER TABLE groups_config ADD COLUMN xp_enabled INTEGER DEFAULT 1',
+    "ALTER TABLE groups_config ADD COLUMN leave_text TEXT DEFAULT '☹️ @user não aguentou e abandonou o Mahito.'",
+    'ALTER TABLE groups_config ADD COLUMN anti_flood_media INTEGER DEFAULT 0',
+    'ALTER TABLE groups_config ADD COLUMN anti_flood_media_max INTEGER DEFAULT 8',
+    'ALTER TABLE groups_config ADD COLUMN anti_flood_media_interval INTEGER DEFAULT 60',
+    'ALTER TABLE groups_config ADD COLUMN slow_mode_seconds INTEGER DEFAULT 0',
+    'ALTER TABLE groups_config ADD COLUMN anti_nsfw_enabled INTEGER DEFAULT 0',
+    'ALTER TABLE groups_config ADD COLUMN auto_reply_enabled INTEGER DEFAULT 1',
+    'ALTER TABLE groups_config ADD COLUMN achievements_enabled INTEGER DEFAULT 1',
+    "ALTER TABLE groups_config ADD COLUMN alert_group_jid TEXT DEFAULT ''",
+    'ALTER TABLE users_data ADD COLUMN first_seen INTEGER DEFAULT 0',
+    'ALTER TABLE users_data ADD COLUMN last_message_at INTEGER DEFAULT 0',
+    'ALTER TABLE users_data ADD COLUMN total_messages INTEGER DEFAULT 0'
+  ]
+  for (const sql of migrations) {
+    try { d.exec(sql) } catch {}
+  }
 }
 
 // ─── Groups Config ───
@@ -340,6 +392,114 @@ function getAllChatKeys() {
   return d.prepare('SELECT * FROM chat_history_keys').all()
 }
 
+// ─── Auto Replies ───
+
+function getAutoReplies(groupId) {
+  const d = getDB()
+  const gid = getBaseJid(groupId)
+  return d.prepare('SELECT * FROM auto_replies WHERE group_id = ?').all(gid)
+}
+
+function addAutoReply(groupId, trigger, response) {
+  const d = getDB()
+  const gid = getBaseJid(groupId)
+  try {
+    d.prepare('INSERT INTO auto_replies (group_id, trigger_word, response) VALUES (?, ?, ?)').run(gid, trigger.toLowerCase(), response)
+    return true
+  } catch { return false }
+}
+
+function removeAutoReply(groupId, trigger) {
+  const d = getDB()
+  const gid = getBaseJid(groupId)
+  d.prepare('DELETE FROM auto_replies WHERE group_id = ? AND trigger_word = ?').run(gid, trigger.toLowerCase())
+  return true
+}
+
+// ─── Achievements ───
+
+function getUserAchievements(userId, groupId) {
+  const d = getDB()
+  const uid = getBaseJid(userId)
+  const gid = getBaseJid(groupId)
+  return d.prepare('SELECT * FROM achievements WHERE user_id = ? AND group_id = ?').all(uid, gid)
+}
+
+function unlockAchievement(userId, groupId, key) {
+  const d = getDB()
+  const uid = getBaseJid(userId)
+  const gid = getBaseJid(groupId)
+  try {
+    d.prepare('INSERT INTO achievements (user_id, group_id, achievement_key, unlocked_at) VALUES (?, ?, ?, ?)').run(uid, gid, key, Date.now())
+    return true // newly unlocked
+  } catch { return false } // already unlocked
+}
+
+function countAchievements(userId, groupId) {
+  const d = getDB()
+  const uid = getBaseJid(userId)
+  const gid = getBaseJid(groupId)
+  return d.prepare('SELECT COUNT(*) as c FROM achievements WHERE user_id = ? AND group_id = ?').get(uid, gid).c
+}
+
+// ─── Weekly Stats ───
+
+function getWeekStart() {
+  const now = new Date()
+  const day = now.getDay()
+  const diff = now.getDate() - day + (day === 0 ? -6 : 1) // Monday
+  const monday = new Date(now.setDate(diff))
+  monday.setHours(0, 0, 0, 0)
+  return monday.getTime()
+}
+
+function incrementWeeklyStat(groupId, field) {
+  const d = getDB()
+  const gid = getBaseJid(groupId)
+  const ws = getWeekStart()
+  d.prepare('INSERT OR IGNORE INTO weekly_stats (group_id, week_start) VALUES (?, ?)').run(gid, ws)
+  const allowed = ['total_messages', 'members_joined', 'members_left', 'strikes_given', 'bans_given']
+  if (!allowed.includes(field)) return
+  d.prepare(`UPDATE weekly_stats SET ${field} = ${field} + 1 WHERE group_id = ? AND week_start = ?`).run(gid, ws)
+}
+
+function setWeeklyMostActive(groupId, userId) {
+  const d = getDB()
+  const gid = getBaseJid(groupId)
+  const ws = getWeekStart()
+  d.prepare('INSERT OR IGNORE INTO weekly_stats (group_id, week_start) VALUES (?, ?)').run(gid, ws)
+  d.prepare('UPDATE weekly_stats SET most_active_user = ? WHERE group_id = ? AND week_start = ?').run(userId, gid, ws)
+}
+
+function getWeeklyStats(groupId) {
+  const d = getDB()
+  const gid = getBaseJid(groupId)
+  const ws = getWeekStart()
+  return d.prepare('SELECT * FROM weekly_stats WHERE group_id = ? AND week_start = ?').get(gid, ws)
+}
+
+// ─── User Activity Tracking ───
+
+function trackUserActivity(userId, groupId) {
+  const d = getDB()
+  const uid = getBaseJid(userId)
+  const gid = getBaseJid(groupId)
+  const now = Date.now()
+  d.prepare('INSERT OR IGNORE INTO users_data (user_id, group_id) VALUES (?, ?)').run(uid, gid)
+  const row = d.prepare('SELECT first_seen FROM users_data WHERE user_id = ? AND group_id = ?').get(uid, gid)
+  if (!row.first_seen) {
+    d.prepare('UPDATE users_data SET first_seen = ? WHERE user_id = ? AND group_id = ?').run(now, uid, gid)
+  }
+  d.prepare('UPDATE users_data SET last_message_at = ?, total_messages = total_messages + 1 WHERE user_id = ? AND group_id = ?').run(now, uid, gid)
+}
+
+function getInactiveMembers(groupId, daysSince) {
+  const d = getDB()
+  const gid = getBaseJid(groupId)
+  const cutoff = Date.now() - (daysSince * 24 * 60 * 60 * 1000)
+  return d.prepare('SELECT * FROM users_data WHERE group_id = ? AND last_message_at > 0 AND last_message_at < ? ORDER BY last_message_at ASC').all(gid, cutoff)
+}
+
 module.exports = {
   getDB,
   initTables,
@@ -369,5 +529,17 @@ module.exports = {
   XP_PER_MESSAGE,
   XP_PER_LEVEL,
   upsertChatKey,
-  getAllChatKeys
+  getAllChatKeys,
+  getAutoReplies,
+  addAutoReply,
+  removeAutoReply,
+  getUserAchievements,
+  unlockAchievement,
+  countAchievements,
+  incrementWeeklyStat,
+  setWeeklyMostActive,
+  getWeeklyStats,
+  getWeekStart,
+  trackUserActivity,
+  getInactiveMembers
 }

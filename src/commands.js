@@ -14,13 +14,17 @@ const {
   getAllowedGroups, addAllowedGroupDB, removeAllowedGroupDB,
   getBlacklist, addBlacklistItem, removeBlacklistItem,
   getSchedules, addSchedule, removeSchedule,
-  XP_PER_LEVEL
+  XP_PER_LEVEL, getAutoReplies, addAutoReply, removeAutoReply,
+  getUserAchievements, countAchievements, getInactiveMembers, trackUserActivity
 } = require('./db')
-const { normalize, onlyDigits, jidToNumber, logLocal, getBaseJid, extractUrls, sleep } = require('./utils')
+const { normalize, onlyDigits, jidToNumber, logLocal, getBaseJid, extractUrls, sleep, getText } = require('./utils')
 const { safeSendMessage, safeDelete, safeRemove, sendDiscordLog, enqueueWA } = require('./queue')
 const { getGroupName, getGroupMeta } = require('./group')
 const { sendStrikeWarning } = require('./moderation')
 const { enviarReacaoMahito } = require('./reactions')
+const { formatAchievementList, TOTAL_ACHIEVEMENTS } = require('./achievements')
+const { createBackup, commitAndPushBackup, listBackups } = require('./backup')
+const { generateWeeklyReport } = require('./reports')
 
 // ─── Sticker Helpers ───
 
@@ -69,6 +73,7 @@ async function renderGroupDashboard(sock, groupJid) {
   const gc = getGroupConfig(groupJid)
   const meta = await getGroupMeta(sock, groupJid)
   const groupName = meta?.subject || 'Grupo Desconhecido'
+  const slowLabel = gc.slow_mode_seconds > 0 ? `${gc.slow_mode_seconds}s` : 'OFF'
 
   return (
     `📊 *Dashboard: ${groupName}*\n` +
@@ -87,7 +92,14 @@ async function renderGroupDashboard(sock, groupJid) {
     `1️⃣2️⃣ Mensagem de Saída: *[${gc.leave_enabled ? 'ON' : 'OFF'}]*\n` +
     `1️⃣3️⃣ Mudar Texto de Saída\n` +
     `1️⃣4️⃣ Gerenciar Permissões (VIPs/Mod)\n` +
-    `1️⃣5️⃣ Fechar/Abrir Grupo (Só Admins)\n\n` +
+    `1️⃣5️⃣ Fechar/Abrir Grupo (Só Admins)\n` +
+    `1️⃣6️⃣ Anti-Flood Mídia: *[${gc.anti_flood_media ? 'ON' : 'OFF'}]*\n` +
+    `1️⃣7️⃣ Modo Slow: *[${slowLabel}]*\n` +
+    `1️⃣8️⃣ Anti-NSFW: *[${gc.anti_nsfw_enabled ? 'ON' : 'OFF'}]*\n` +
+    `1️⃣9️⃣ Auto-Respostas: *[${gc.auto_reply_enabled ? 'ON' : 'OFF'}]*\n` +
+    `2️⃣0️⃣ Conquistas: *[${gc.achievements_enabled ? 'ON' : 'OFF'}]*\n` +
+    `2️⃣1️⃣ Gerenciar Auto-Respostas\n` +
+    `2️⃣2️⃣ Configurar Grupo de Alertas\n\n` +
     `0️⃣ Voltar`
   )
 }
@@ -289,7 +301,7 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     }
     if (msg === '8') {
       state.customerStates[jid].flow = 'menu_sys'
-      await safeSendMessage(sock, jid, { text: `*Sistema*\n\n1️⃣ Reiniciar Bot\n2️⃣ Atualizar do GitHub\n3️⃣ Apagar meus DMs (Mantém grupos)\n4️⃣ Limpar Mensagens de Tudo\n5️⃣ DESLIGAR BOT (Shutdown)\n0️⃣ Voltar` })
+      await safeSendMessage(sock, jid, { text: `*Sistema*\n\n1️⃣ Reiniciar Bot\n2️⃣ Atualizar do GitHub\n3️⃣ Apagar meus DMs (Mantém grupos)\n4️⃣ Limpar Mensagens de Tudo\n5️⃣ DESLIGAR BOT (Shutdown)\n6️⃣ Fazer Backup Agora\n7️⃣ Enviar Relatório Semanal\n0️⃣ Voltar` })
       return
     }
   }
@@ -384,7 +396,11 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       '6': 'basic_commands_enabled',
       '7': 'welcome_enabled',
       '11': 'xp_enabled',
-      '12': 'leave_enabled'
+      '12': 'leave_enabled',
+      '16': 'anti_flood_media',
+      '18': 'anti_nsfw_enabled',
+      '19': 'auto_reply_enabled',
+      '20': 'achievements_enabled'
     }
     if (toggles[msg]) {
       const key = toggles[msg]
@@ -436,6 +452,26 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
          await safeSendMessage(sock, jid, { text: `❌ Erro: O bot precisa ser Admin do grupo.` })
        }
        return
+    }
+    if (msg === '17') {
+      state.customerStates[jid].flow = 'awaiting_slow_mode'
+      await safeSendMessage(sock, jid, { text: '💬 Digite o intervalo em segundos (Ex: 30) ou 0 para desativar:' })
+      return
+    }
+    if (msg === '21') {
+      const replies = getAutoReplies(targetJid)
+      const list = replies.length
+        ? replies.map((r, i) => `${i+1}. "${r.trigger_word}" → ${r.response}`).join('\n')
+        : 'Nenhuma auto-resposta cadastrada.'
+      state.customerStates[jid].flow = 'menu_auto_replies'
+      await safeSendMessage(sock, jid, { text: `📝 *Auto-Respostas*\n\n${list}\n\n1️⃣ Adicionar\n2️⃣ Remover\n0️⃣ Voltar` })
+      return
+    }
+    if (msg === '22') {
+      state.customerStates[jid].flow = 'awaiting_alert_group'
+      const currentAlert = getGroupConfig(targetJid).alert_group_jid
+      await safeSendMessage(sock, jid, { text: `🚨 *Grupo de Alertas*\n\nAtual: ${currentAlert || 'Nenhum'}\n\nDigite o ID do grupo de alertas (Ex: 120363426413694744@g.us) ou 0 para remover:` })
+      return
     }
   }
 
@@ -520,6 +556,77 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     }
     state.customerStates[jid].flow = 'menu_group_dashboard'
     await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, groupJid) })
+    return
+  }
+
+  // ─── Slow Mode Input ───
+  if (sc.flow === 'awaiting_slow_mode') {
+    const val = parseInt(onlyDigits(msg))
+    if (!isNaN(val)) {
+      setGroupConfig(sc.selectedGroupJid, 'slow_mode_seconds', val)
+      await safeSendMessage(sock, jid, { text: val > 0 ? `✅ Modo Slow ativado: ${val} segundos entre mensagens.` : '✅ Modo Slow desativado.' })
+    }
+    state.customerStates[jid].flow = 'menu_group_dashboard'
+    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
+    return
+  }
+
+  // ─── Alert Group Config ───
+  if (sc.flow === 'awaiting_alert_group') {
+    const val = raw.trim()
+    if (val === '0') {
+      setGroupConfig(sc.selectedGroupJid, 'alert_group_jid', '')
+      await safeSendMessage(sock, jid, { text: '✅ Grupo de alertas removido.' })
+    } else {
+      setGroupConfig(sc.selectedGroupJid, 'alert_group_jid', val)
+      await safeSendMessage(sock, jid, { text: `✅ Grupo de alertas configurado: ${val}` })
+    }
+    state.customerStates[jid].flow = 'menu_group_dashboard'
+    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
+    return
+  }
+
+  // ─── Auto-Replies Management ───
+  if (sc.flow === 'menu_auto_replies') {
+    if (msg === '0') {
+      state.customerStates[jid].flow = 'menu_group_dashboard'
+      await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
+      return
+    }
+    if (msg === '1') {
+      state.customerStates[jid].flow = 'awaiting_auto_reply_trigger'
+      await safeSendMessage(sock, jid, { text: '💬 Digite a palavra-gatilho (Ex: como instalar):' })
+      return
+    }
+    if (msg === '2') {
+      state.customerStates[jid].flow = 'awaiting_auto_reply_remove'
+      await safeSendMessage(sock, jid, { text: '💬 Digite a palavra-gatilho a remover:' })
+      return
+    }
+  }
+
+  if (sc.flow === 'awaiting_auto_reply_trigger') {
+    state.customerStates[jid].autoReplyTrigger = raw.trim().toLowerCase()
+    state.customerStates[jid].flow = 'awaiting_auto_reply_response'
+    await safeSendMessage(sock, jid, { text: `💬 Agora digite a resposta para o gatilho "${raw.trim()}":` })
+    return
+  }
+
+  if (sc.flow === 'awaiting_auto_reply_response') {
+    const trigger = sc.autoReplyTrigger
+    const response = raw.trim()
+    const ok = addAutoReply(sc.selectedGroupJid, trigger, response)
+    await safeSendMessage(sock, jid, { text: ok ? `✅ Auto-resposta criada!\n"${trigger}" → ${response}` : '❌ Esse gatilho já existe.' })
+    state.customerStates[jid].flow = 'menu_group_dashboard'
+    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
+    return
+  }
+
+  if (sc.flow === 'awaiting_auto_reply_remove') {
+    removeAutoReply(sc.selectedGroupJid, raw.trim())
+    await safeSendMessage(sock, jid, { text: `✅ Auto-resposta removida: "${raw.trim()}"` })
+    state.customerStates[jid].flow = 'menu_group_dashboard'
+    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
     return
   }
 
@@ -672,6 +779,30 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       await safeSendMessage(sock, jid, { text: '⏻ Desligando sistema Mahito...' })
       await sleep(1000)
       process.exit(99)
+    }
+    if (msg === '6') {
+      await safeSendMessage(sock, jid, { text: '💾 Criando backup...' })
+      const backupPath = createBackup()
+      if (backupPath) {
+        const pushed = commitAndPushBackup()
+        const backupList = listBackups()
+        await safeSendMessage(sock, jid, {
+          text: `✅ *Backup concluído!*\n\n📁 Backups salvos: ${backupList.length}\n📤 Push pro GitHub: ${pushed ? 'Sucesso' : 'Falhou (verifique remote)'}\n\n📄 *Últimos backups:*\n${backupList.slice(0, 5).join('\n')}`
+        })
+      } else {
+        await safeSendMessage(sock, jid, { text: '❌ Erro ao criar backup.' })
+      }
+      return
+    }
+    if (msg === '7') {
+      await safeSendMessage(sock, jid, { text: '📊 Gerando relatórios semanais...' })
+      const groups = getAllowedGroups()
+      for (const groupJid of groups) {
+        const report = await generateWeeklyReport(sock, groupJid)
+        await safeSendMessage(sock, jid, { text: report.text, mentions: report.mentions }, {}, 2000)
+      }
+      await safeSendMessage(sock, jid, { text: `✅ ${groups.length} relatório(s) enviado(s).` })
+      return
     }
     if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
   }
@@ -1301,6 +1432,73 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
       mentions: [winnerBase]
     })
     await enviarReacaoMahito(sock, groupJid, 'fun').catch(() => {})
+    return true
+  }
+
+  // ─── !perfil ───
+  if (cmd === '!perfil') {
+    const mentionedRaw = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || []
+    const targetJid = mentionedRaw.length > 0 ? getBaseJid(mentionedRaw[0]) : userJid
+    const data = getUserData(targetJid, groupJid)
+    const levels = { 0: 'Membro', 1: 'VIP', 2: 'Mod', 3: 'Dono' }
+    const nextLevelXP = (data.level + 1) * XP_PER_LEVEL
+    const achievementCount = countAchievements(targetJid, groupJid)
+    const firstSeen = data.first_seen ? new Date(data.first_seen).toLocaleDateString('pt-BR') : 'Desconhecido'
+    const lastMsg = data.last_message_at ? new Date(data.last_message_at).toLocaleDateString('pt-BR') : 'Nunca'
+    
+    const card =
+      `┌──────────────────────┐\n` +
+      `│  👤 @${jidToNumber(targetJid)}\n` +
+      `│  🎖️ Cargo: ${levels[data.perm_level] || 'Membro'}\n` +
+      `│  ⭐ XP: ${data.xp}\n` +
+      `│  📈 Nível: ${data.level}\n` +
+      `│  🏆 Conquistas: ${achievementCount}/${TOTAL_ACHIEVEMENTS}\n` +
+      `│  💬 Total Msgs: ${data.total_messages || 0}\n` +
+      `│  ⚡ Strikes: ${data.penalties}\n` +
+      `│  📅 Desde: ${firstSeen}\n` +
+      `│  🕐 Último: ${lastMsg}\n` +
+      `│  🎯 Próximo nível: ${nextLevelXP - data.xp} XP\n` +
+      `└──────────────────────┘`
+
+    await safeSendMessage(sock, groupJid, { text: card, mentions: [targetJid] })
+    return true
+  }
+
+  // ─── !conquistas ───
+  if (cmd === '!conquistas') {
+    const mentionedRaw = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || []
+    const targetJid = mentionedRaw.length > 0 ? getBaseJid(mentionedRaw[0]) : userJid
+    const list = formatAchievementList(targetJid, groupJid)
+    const count = countAchievements(targetJid, groupJid)
+    await safeSendMessage(sock, groupJid, {
+      text: `🏆 *Conquistas de @${jidToNumber(targetJid)}* (${count}/${TOTAL_ACHIEVEMENTS})\n\n${list}`,
+      mentions: [targetJid]
+    })
+    return true
+  }
+
+  // ─── !inativos ───
+  if (cmd === '!inativos') {
+    const { isOwner } = require('./config')
+    if (!isOwner(userJid, config) && !isAdminOrVIP) {
+      await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins/donos podem usar este comando.' })
+      return true
+    }
+    const days = Math.max(1, Math.min(90, Number(parts[1] || 7)))
+    const inactive = getInactiveMembers(groupJid, days)
+    if (!inactive.length) {
+      await safeSendMessage(sock, groupJid, { text: `✅ Nenhum membro inativo nos últimos ${days} dias.` })
+      return true
+    }
+    const lines = inactive.slice(0, 20).map(u => {
+      const lastDate = new Date(u.last_message_at).toLocaleDateString('pt-BR')
+      return `• @${jidToNumber(u.user_id)} — última msg: ${lastDate}`
+    })
+    const mentions = inactive.slice(0, 20).map(u => getBaseJid(u.user_id))
+    await safeSendMessage(sock, groupJid, {
+      text: `👻 *Inativos há ${days}+ dias* (${inactive.length} total)\n\n${lines.join('\n')}`,
+      mentions
+    })
     return true
   }
 
