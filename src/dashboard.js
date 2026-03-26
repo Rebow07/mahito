@@ -108,16 +108,11 @@ function startDashboard(sock) {
       if (!groupId) return sendJSON(res, { error: 'no group' })
       try {
         const meta = await sockRef.groupMetadata(groupId)
-        const sample = (meta?.participants || []).slice(0, 3).map(p => ({
-          id: p.id,
-          lid: p.lid,
-          number: p.number,
-          notify: p.notify,
-          verifiedName: p.verifiedName,
-          name: p.name,
-          admin: p.admin,
-          allKeys: Object.keys(p)
-        }))
+        const sample = (meta?.participants || []).slice(0, 3).map(p => {
+          const dump = {}
+          for (const key of Object.keys(p)) dump[key] = p[key]
+          return dump
+        })
         return sendJSON(res, { subject: meta?.subject, participantCount: meta?.participants?.length, sampleParticipants: sample })
       } catch (err) { return sendJSON(res, { error: err.message }) }
     }
