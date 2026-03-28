@@ -269,6 +269,12 @@ async function connect() {
             const { processReminderCommand } = require('./scheduler')
             if (await processReminderCommand(text, sock, senderJid, null)) return
 
+            const { processBroadcastCommand } = require('./broadcast')
+            if (await processBroadcastCommand(text, sock, senderJid)) return
+
+            const { processBotsCommand } = require('./bots')
+            if (await processBotsCommand(text, sock, senderJid)) return
+
             await processOwnerPrivate(sock, senderJid, text, msg)
           } else {
             if (!text) return

@@ -76,6 +76,7 @@ function ownerPrivateMenu() {
     `8️⃣ *Proteção Global*\n` +
     `9️⃣ *Automação e Agendamentos*\n` +
     `🔟 *Configurações do Sistema*\n` +
+    `1️⃣1️⃣ *Bots e Transmissão*\n` +
     `0️⃣ *Sair do Menu*`
   )
 }
@@ -351,6 +352,11 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     if (msg === '10') {
       state.customerStates[jid].flow = 'menu_sys'
       await safeSendMessage(sock, jid, { text: `*Configurações do Sistema*\n\n1️⃣ Reiniciar Bot\n2️⃣ Atualizar do GitHub\n3️⃣ Apagar meus DMs (Mantém grupos)\n4️⃣ Limpar Mensagens de Tudo\n5️⃣ DESLIGAR BOT (Shutdown)\n6️⃣ Fazer Backup Agora\n7️⃣ Enviar Relatório Semanal\n8️⃣ Identidade Mahito (Stickers/Foto)\n0️⃣ Voltar` })
+      return
+    }
+    if (msg === '11') {
+      state.customerStates[jid].flow = 'menu_bots_transmissao'
+      await safeSendMessage(sock, jid, { text: `*Bots e Transmissão*\n\n1️⃣ Ver números cadastrados (!bots lista)\n2️⃣ Configurar número de transmissão\n3️⃣ Configurar número pessoal\n4️⃣ Ver lista de transmissão (!lista ver)\n5️⃣ Adicionar contato à lista\n6️⃣ Enviar transmissão\n0️⃣ Voltar` })
       return
     }
   }
@@ -1033,6 +1039,104 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
   }
 
+  // ─── Menu Bots e Transmissão ───
+  if (sc.flow === 'menu_bots_transmissao') {
+    if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
+    if (msg === '1') {
+      // Listar bots
+      const { getBotNumbers, getBotConfig } = require('./db')
+      const bots = getBotNumbers()
+      const currentSender = getBotConfig('broadcast_sender') || 'Não configurado'
+      const currentPersonal = getBotConfig('personal_sender') || 'Não configurado'
+      if (!bots.length) {
+        await safeSendMessage(sock, jid, { text: `🤖 Nenhum número cadastrado.\n\n📡 Sender Transmissão: *${currentSender}*\n💜 Sender Pessoal: *${currentPersonal}*\n\nUse !bots add no chat para cadastrar.` })
+      } else {
+        const purposeLabels = { general: '🌐 Geral', personal: '💜 Pessoal', broadcast: '📡 Transmissão' }
+        const lines = bots.map((b, i) => `${i + 1}. ${b.active ? '🟢' : '🔴'} *${b.label}* (${b.phone}) — ${purposeLabels[b.purpose] || b.purpose}`)
+        await safeSendMessage(sock, jid, { text: `🤖 *Números Cadastrados*\n\n${lines.join('\n')}\n\n📡 Sender: *${currentSender}*\n💜 Pessoal: *${currentPersonal}*` })
+      }
+      return
+    }
+    if (msg === '2') {
+      state.customerStates[jid].flow = 'awaiting_broadcast_sender'
+      await safeSendMessage(sock, jid, { text: '📱 Digite o número para transmissão (Ex: 5517988410596):' })
+      return
+    }
+    if (msg === '3') {
+      state.customerStates[jid].flow = 'awaiting_personal_sender'
+      await safeSendMessage(sock, jid, { text: '📱 Digite o número pessoal (módulo afetivo) (Ex: 5517920043856):' })
+      return
+    }
+    if (msg === '4') {
+      const { getBroadcastList } = require('./db')
+      const list = getBroadcastList(jid)
+      if (!list.length) {
+        await safeSendMessage(sock, jid, { text: '📭 Lista de transmissão vazia.' })
+      } else {
+        const lines = list.map((c, i) => `${i + 1}. ${c.name} (${jidToNumber(c.contact_jid)})`)
+        await safeSendMessage(sock, jid, { text: `📡 *Lista de Transmissão* (${list.length})\n\n${lines.join('\n')}` })
+      }
+      return
+    }
+    if (msg === '5') {
+      state.customerStates[jid].flow = 'awaiting_broadcast_add'
+      await safeSendMessage(sock, jid, { text: '💬 Digite no formato: número | nome\nEx: 5517999999999 | João Silva' })
+      return
+    }
+    if (msg === '6') {
+      state.customerStates[jid].flow = 'awaiting_broadcast_send'
+      await safeSendMessage(sock, jid, { text: '💬 Digite a mensagem que deseja enviar para toda a lista de transmissão:' })
+      return
+    }
+  }
+
+  if (sc.flow === 'awaiting_broadcast_sender') {
+    const { setBotConfig } = require('./db')
+    setBotConfig('broadcast_sender', onlyDigits(raw))
+    await safeSendMessage(sock, jid, { text: `✅ Número de transmissão definido: ${onlyDigits(raw)}` })
+    state.customerStates[jid].flow = 'owner_menu'
+    await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
+    return
+  }
+
+  if (sc.flow === 'awaiting_personal_sender') {
+    const { setBotConfig } = require('./db')
+    setBotConfig('personal_sender', onlyDigits(raw))
+    await safeSendMessage(sock, jid, { text: `✅ Número pessoal definido: ${onlyDigits(raw)}` })
+    state.customerStates[jid].flow = 'owner_menu'
+    await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
+    return
+  }
+
+  if (sc.flow === 'awaiting_broadcast_add') {
+    const match = raw.match(/^([0-9]+)\s*\|\s*(.+)/)
+    if (!match) {
+      await safeSendMessage(sock, jid, { text: '❌ Formato inválido. Use: número | nome' })
+    } else {
+      const { addBroadcastContact } = require('./db')
+      const num = onlyDigits(match[1])
+      const name = match[2].trim()
+      addBroadcastContact(jid, `${num}@s.whatsapp.net`, name)
+      await safeSendMessage(sock, jid, { text: `✅ ${name} (${num}) adicionado à lista.` })
+    }
+    state.customerStates[jid].flow = 'menu_bots_transmissao'
+    await safeSendMessage(sock, jid, { text: `*Bots e Transmissão*\n\n1️⃣ Ver números cadastrados\n2️⃣ Configurar número de transmissão\n3️⃣ Configurar número pessoal\n4️⃣ Ver lista de transmissão\n5️⃣ Adicionar contato à lista\n6️⃣ Enviar transmissão\n0️⃣ Voltar` })
+    return
+  }
+
+  if (sc.flow === 'awaiting_broadcast_send') {
+    const message = raw.trim()
+    if (!message) {
+      await safeSendMessage(sock, jid, { text: '❌ Mensagem vazia.' })
+    } else {
+      const { processBroadcastCommand } = require('./broadcast')
+      await processBroadcastCommand(`!lista enviar ${message}`, sock, jid)
+    }
+    state.customerStates[jid].flow = 'owner_menu'
+    await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
+    return
+  }
+
   if (msg === 'status') {
     const { getTotalUsers } = require('./db')
     await safeSendMessage(sock, jid, {
@@ -1282,13 +1386,35 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
         `• !aviso @user — Dar strike\n` +
         `• !reset @user — Zerar strikes\n` +
         `• !limpar [N] — Apagar últimas N msgs\n` +
-        `• !varrerlinks — Apagar todas os links\n` +
+        `• !varrerlinks — Apagar todos os links\n` +
         `• !inativos [dias] — Listar fantasmas\n\n` +
         `🎨 *Diversão*\n` +
         `• !s — Criar figurinha de imagem\n` +
         `• !mahito — Figurinha do Mahito\n` +
         `• !sorteio — Sortear membro aleatório\n` +
         `• !todos [msg] — Marcar todos\n\n` +
+        `📋 *Módulo Pessoal*\n` +
+        `• !pessoal perfil <texto> — Define personalidade para a IA\n` +
+        `• !pessoal add <num> | <parentesco> | <nome> | [notas]\n` +
+        `• !pessoal remove <num>\n` +
+        `• !pessoal list — Lista contatos cadastrados\n` +
+        `• !pessoal agendar DD/MM HH:MM | <num> | <msg>\n` +
+        `• !pessoal agenda — Agendamentos pendentes\n` +
+        `• !pessoal cancelar <id>\n\n` +
+        `⏰ *Lembretes*\n` +
+        `• !lembrete DD/MM HH:MM | <texto>\n` +
+        `• !lembrete DD/MM HH:MM | <texto> | daily\n` +
+        `• !lembretes — Próximos 7 dias\n\n` +
+        `⚙️ *Comandos Dinâmicos*\n` +
+        `• !cmd add !trigger | instrução — Comando IA\n` +
+        `• !cmd add !trigger | texto --fixed — Comando fixo\n` +
+        `• !cmd remove !trigger\n` +
+        `• !cmd list\n\n` +
+        `📡 *Transmissão (Privado/Dono)*\n` +
+        `• !lista add <num> | <nome>\n` +
+        `• !lista remove <num>\n` +
+        `• !lista ver\n` +
+        `• !lista enviar <mensagem>\n\n` +
         `📋 *Info*\n` +
         `• !regras — Regras do grupo\n` +
         `• !status — Status do bot\n` +

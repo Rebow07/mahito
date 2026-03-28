@@ -28,7 +28,7 @@ Regras:
 
   try {
     const genAI = new GoogleGenerativeAI(geminiKey.value)
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash', systemInstruction })
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash', systemInstruction })
     const result = await model.generateContent({ contents: [{ role: 'user', parts: [{ text: `Escreva uma mensagem matinal para ${contactInfo.name} agora.` }] }] })
     return await result.response.text()
   } catch (err) {
@@ -176,6 +176,68 @@ async function handlePersonalCommand(text, sock, senderJid) {
     }
     const txt = list.map(c => `• ${c.name} (${jidToNumber(c.jid)})\n  Relação: ${c.relationship}`).join('\n\n')
     await safeSendMessage(sock, senderJid, { text: `📋 Pessoas Ativas no Bom Dia:\n\n${txt}` })
+    return true
+  }
+
+  // ─── Agendamento Pessoal ───
+
+  if (sub === 'agendar') {
+    // !pessoal agendar DD/MM HH:MM | <numero> | <mensagem>
+    const match = text.match(/!pessoal agendar\s+(\d{2}\/\d{2})\s+(\d{2}:\d{2})\s*\|\s*([0-9]+)\s*\|\s*(.+)/i)
+    if (!match) {
+      await safeSendMessage(sock, senderJid, { text: 'Uso: !pessoal agendar DD/MM HH:MM | número | mensagem\nEx: !pessoal agendar 15/04 09:30 | 5517999999999 | Bom dia!' })
+      return true
+    }
+    const dateStr = match[1]
+    const timeStr = match[2]
+    const targetNum = match[3].trim()
+    const mensagem = match[4].trim()
+    const targetJid = `${targetNum}@s.whatsapp.net`
+
+    const dateMatch = dateStr.match(/^(\d{2})\/(\d{2})$/)
+    const timeMatch = timeStr.match(/^(\d{2}):(\d{2})$/)
+    if (!dateMatch || !timeMatch) {
+      await safeSendMessage(sock, senderJid, { text: '❌ Formato de data inválido. Use DD/MM HH:MM' })
+      return true
+    }
+
+    const now = new Date()
+    let target = new Date(now.getFullYear(), Number(dateMatch[2]) - 1, Number(dateMatch[1]), Number(timeMatch[1]), Number(timeMatch[2]), 0)
+    if (target < now) target.setFullYear(target.getFullYear() + 1)
+
+    d.prepare('INSERT INTO reminders (user_jid, group_jid, titulo, datetime_alvo, recorrencia, active) VALUES (?, ?, ?, ?, ?, 1)')
+      .run(targetJid, null, mensagem, target.toISOString(), 'none')
+
+    await safeSendMessage(sock, senderJid, {
+      text: `✅ Mensagem agendada!\n\n📱 Para: ${targetNum}\n📅 Data: ${target.toLocaleString('pt-BR')}\n💬 Msg: ${mensagem}`
+    })
+    return true
+  }
+
+  if (sub === 'agenda') {
+    const { getOwnerReminders } = require('./db')
+    const reminders = getOwnerReminders(senderJid)
+    if (!reminders.length) {
+      await safeSendMessage(sock, senderJid, { text: '📭 Nenhum agendamento pendente.' })
+      return true
+    }
+    const lines = reminders.map(r => {
+      const dt = new Date(r.datetime_alvo).toLocaleString('pt-BR')
+      const dest = r.group_jid ? r.group_jid : jidToNumber(r.user_jid)
+      return `🔔 ID ${r.id} — ${dt}\n   📱 ${dest}\n   💬 ${r.titulo}`
+    })
+    await safeSendMessage(sock, senderJid, { text: `📋 *Agendamentos Pendentes*\n\n${lines.join('\n\n')}\n\nPara cancelar: !pessoal cancelar <id>` })
+    return true
+  }
+
+  if (sub === 'cancelar') {
+    const id = parseInt(args[2])
+    if (!id || isNaN(id)) {
+      await safeSendMessage(sock, senderJid, { text: 'Uso: !pessoal cancelar <id>\nVeja IDs com: !pessoal agenda' })
+      return true
+    }
+    d.prepare('UPDATE reminders SET active = 0 WHERE id = ?').run(id)
+    await safeSendMessage(sock, senderJid, { text: `✅ Agendamento #${id} cancelado.` })
     return true
   }
 

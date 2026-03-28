@@ -212,6 +212,39 @@ function initTables() {
       last_sent TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS broadcast_list (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      owner_jid TEXT NOT NULL,
+      contact_jid TEXT NOT NULL,
+      name TEXT NOT NULL,
+      active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS broadcast_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      owner_jid TEXT NOT NULL,
+      message TEXT NOT NULL,
+      sender_number TEXT NOT NULL,
+      scheduled_at TEXT,
+      sent_at TEXT,
+      status TEXT DEFAULT 'pending'
+    );
+
+    CREATE TABLE IF NOT EXISTS bot_numbers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      label TEXT NOT NULL,
+      phone TEXT NOT NULL UNIQUE,
+      session_path TEXT NOT NULL,
+      purpose TEXT DEFAULT 'general',
+      active INTEGER DEFAULT 1
+    );
+
+    CREATE TABLE IF NOT EXISTS bot_config (
+      config_key TEXT PRIMARY KEY,
+      config_value TEXT NOT NULL
+    );
+
     INSERT OR IGNORE INTO personas (persona_id, name, tone, ai_system_prompt, ai_reply_enabled, ai_always_on) VALUES 
     ('mahito-padrao', 'Mahito', 'Sarcástico e direto', 'Você é o Mahito, vilão de Jujutsu Kaisen. Odeia a fragilidade humana e sempre responde de forma um tanto sádica.', 1, 0),
     ('kelvin-pessoal', 'Kelvin', 'Informal e carinhoso', 'Sou o Kelvin (Rebow), pai de família, tenho TDAH, gosto de música pesada (BMTH) e amo meus ratos e meu bull terrier.', 1, 0),
@@ -680,7 +713,17 @@ module.exports = {
   listAllStickers,
   getPersona,
   getTokenUsage,
-  addTokenUsage
+  addTokenUsage,
+  addBroadcastContact,
+  removeBroadcastContact,
+  getBroadcastList,
+  addBroadcastMessage,
+  updateBroadcastMessage,
+  getBotNumbers,
+  addBotNumber,
+  getBotConfig,
+  setBotConfig,
+  getOwnerReminders
 }
 
 // ─── AI Persona & Token Usage ───
@@ -702,4 +745,69 @@ function addTokenUsage(groupJid, dateIso, tokensAmount) {
   const gid = getBaseJid(groupJid)
   d.prepare('INSERT OR IGNORE INTO token_usage (group_jid, date, tokens_used) VALUES (?, ?, 0)').run(gid, dateIso)
   d.prepare('UPDATE token_usage SET tokens_used = tokens_used + ? WHERE group_jid = ? AND date = ?').run(tokensAmount, gid, dateIso)
+}
+
+// ─── Broadcast List ───
+
+function addBroadcastContact(ownerJid, contactJid, name) {
+  const d = getDB()
+  try {
+    d.prepare('INSERT INTO broadcast_list (owner_jid, contact_jid, name) VALUES (?, ?, ?)').run(ownerJid, contactJid, name)
+    return true
+  } catch { return false }
+}
+
+function removeBroadcastContact(ownerJid, contactJid) {
+  const d = getDB()
+  d.prepare('UPDATE broadcast_list SET active = 0 WHERE owner_jid = ? AND contact_jid LIKE ?').run(ownerJid, `%${contactJid}%`)
+}
+
+function getBroadcastList(ownerJid) {
+  const d = getDB()
+  return d.prepare('SELECT * FROM broadcast_list WHERE owner_jid = ? AND active = 1 ORDER BY id').all(ownerJid)
+}
+
+function addBroadcastMessage(ownerJid, message, senderNumber) {
+  const d = getDB()
+  const r = d.prepare('INSERT INTO broadcast_messages (owner_jid, message, sender_number, scheduled_at) VALUES (?, ?, ?, ?)').run(ownerJid, message, senderNumber, new Date().toISOString())
+  return r.lastInsertRowid
+}
+
+function updateBroadcastMessage(id, status) {
+  const d = getDB()
+  const sentAt = status === 'sent' ? new Date().toISOString() : null
+  d.prepare('UPDATE broadcast_messages SET status = ?, sent_at = COALESCE(?, sent_at) WHERE id = ?').run(status, sentAt, id)
+}
+
+// ─── Bot Numbers ───
+
+function getBotNumbers() {
+  const d = getDB()
+  return d.prepare('SELECT * FROM bot_numbers ORDER BY id').all()
+}
+
+function addBotNumber(label, phone, sessionPath, purpose) {
+  const d = getDB()
+  try {
+    d.prepare('INSERT OR REPLACE INTO bot_numbers (label, phone, session_path, purpose) VALUES (?, ?, ?, ?)').run(label, phone, sessionPath, purpose || 'general')
+    return true
+  } catch { return false }
+}
+
+function getBotConfig(key) {
+  const d = getDB()
+  const row = d.prepare('SELECT config_value FROM bot_config WHERE config_key = ?').get(key)
+  return row ? row.config_value : null
+}
+
+function setBotConfig(key, value) {
+  const d = getDB()
+  d.prepare('INSERT OR REPLACE INTO bot_config (config_key, config_value) VALUES (?, ?)').run(key, value)
+}
+
+// ─── Owner Reminders ───
+
+function getOwnerReminders(userJid) {
+  const d = getDB()
+  return d.prepare('SELECT * FROM reminders WHERE user_jid = ? AND active = 1 ORDER BY datetime_alvo').all(userJid)
 }
