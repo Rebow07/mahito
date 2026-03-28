@@ -166,12 +166,20 @@ async function connect() {
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     try {
       const msg = messages?.[0]
-      if (!msg || !msg.message) return
+      if (!msg) return
 
-      const remoteJid = getBaseJid(msg.key.remoteJid)
+      const rawRemote = msg.key?.remoteJid || ''
+      const remoteJid = rawRemote ? getBaseJid(rawRemote) : 'unknown'
+      const senderJid = getBaseJid(msg.key?.participant || msg.participant || rawRemote)
+      const messageType = msg.message ? Object.keys(msg.message)[0] : 'no-message'
+
+      logger.info('index', 'Mensagem recebida: ' + JSON.stringify({ jid: remoteJid, type: messageType, from: senderJid, isFromMe: !!msg.key?.fromMe, evType: type, botReady: state.botReady }))
+
+      if (!msg.message) return
+
       const text = getText(msg.message)
 
-      if (remoteJid && msg.key.id) {
+      if (remoteJid !== 'unknown' && msg.key.id) {
         try {
           upsertChatKey(
             remoteJid,
@@ -199,8 +207,7 @@ async function connect() {
       const msgTime = msg.messageTimestamp || Math.floor(Date.now() / 1000)
       if (Math.floor(Date.now() / 1000) - msgTime > 60) return
 
-      const senderRaw = msg.key.participant || msg.participant || remoteJid
-      const senderJid = getBaseJid(senderRaw)
+
       const currentConfig = loadConfig()
 
       if (!remoteJid) return
