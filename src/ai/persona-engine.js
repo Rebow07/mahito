@@ -14,7 +14,7 @@ Nunca diga que você é um bot ou uma IA, a menos que sua persona exija isso.`
 
 async function callGemini(keyObj, systemInstruction, history, userMessage) {
   const genAI = new GoogleGenerativeAI(keyObj.value)
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash', systemInstruction })
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash', systemInstruction })
   
   const contents = []
   for (const h of history) {
@@ -65,7 +65,7 @@ async function callGroq(keyObj, systemInstruction, history, userMessage) {
   try {
     const chatCompletion = await groq.chat.completions.create({
       messages,
-      model: 'llama3-8b-8192',
+      model: 'llama-3.3-70b-versatile',
       temperature: 0.7,
       max_tokens: 300
     })
@@ -131,10 +131,11 @@ async function generateResponse(groupJid, senderJid, messageText, historyMsgs, p
     }
   }
 
-  // Static fallback
+  // Static fallback — responde dentro do personagem da persona
   if (!result) {
     logger.error('persona-engine', 'Fallback estático. Nenhuma IA disponível.')
-    return `${persona.name} suspira... Estou com dor de cabeça (Sistema indisponível no momento).`
+    const fallbackPhrase = persona.ban_phrase || persona.welcome_text || `...`
+    return `*${persona.name}*: ${fallbackPhrase}`
   }
 
   if (result && result.tokens) {
