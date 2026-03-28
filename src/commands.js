@@ -65,16 +65,18 @@ function ownerPrivateMenu() {
     `🤖✨ *Mahito — Sistema de Controle*\n\n` +
     `  🧬 Status: 𝑶𝒏𝒍𝒊𝒏𝒆\n` +
     `  📊 Almas Processadas: [${almas}]\n\n` +
-    `Escolha uma categoria (digite o número):\n\n` +
-    `1️⃣ *Controle de Usuários* (Whitelist/Blacklist)\n` +
-    `2️⃣ *Gerenciar Grupos* (Add/Remover/Dashboard)\n` +
-    `3️⃣ *Mensagens Globais e DMs*\n` +
-    `4️⃣ *Proteção Global* (Palavras e Concorrentes)\n` +
-    `5️⃣ *Links Permitidos* (Domínios Leves)\n` +
-    `6️⃣ *Automação* (Agendamentos Diários)\n` +
-    `7️⃣ *Identidade Mahito* (Foto/Avatar)\n` +
-    `8️⃣ *Configurações do Sistema* (Restart/Wipe)\n` +
-    `0️⃣ *Sair do Menu*`
+    `*Painel Principal*\n` +
+    `1️⃣ Controle de Usuários\n` +
+    `2️⃣ Gerenciar Grupos\n` +
+    `3️⃣ Sistema de XP\n` +
+    `4️⃣ Comandos Dinâmicos\n` +
+    `5️⃣ Módulo Pessoal\n` +
+    `6️⃣ Lembretes\n` +
+    `7️⃣ Mensagens Globais e DMs\n` +
+    `8️⃣ Proteção Global\n` +
+    `9️⃣ Automação e Agendamentos\n` +
+    `🔟 Configurações do Sistema\n\n` +
+    `_Escolha uma das opções numéricas:_`
   )
 }
 
@@ -287,35 +289,52 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       return
     }
     if (msg === '3') {
-      state.customerStates[jid].flow = 'menu_msgs'
-      await safeSendMessage(sock, jid, { text: `*Mensagens Globais*\n\n1️⃣ Enviar DM Privada (Assistente)\n2️⃣ Enviar Comunicado Global (Assistente)\n0️⃣ Voltar` })
+      state.customerStates[jid].flow = 'menu_help'
+      await safeSendMessage(sock, jid, { text: `🌟 *Sistema de XP*\n\nComandos utilizáveis nos grupos:\n• \`!xp rank\` — Ver top 10 do grupo\n• \`!xp info\` — Configurações atuais do XP\n• \`!xp config <campo> <valor>\` — Ajustar valores do grupo\n\n_Para configurar fácil, vá em *2️⃣ Gerenciar Grupos > 4 > 11*_.\n\n0️⃣ Voltar` })
       return
     }
     if (msg === '4') {
-      state.customerStates[jid].flow = 'menu_sec'
-      await safeSendMessage(sock, jid, { text: `*Proteção*\n\n1️⃣ Add Palavra Proibida\n2️⃣ Rm Palavra Proibida\n3️⃣ Add Concorrente\n4️⃣ Rm Concorrente\n0️⃣ Voltar` })
+      state.customerStates[jid].flow = 'menu_help'
+      await safeSendMessage(sock, jid, { text: `⚡ *Comandos Dinâmicos*\n\nCrie respostas rápidas e comandos com IA num grupo específico!\n\n• \`!cmd add <gatilho> | <desc> | fixed | Texto\`\n• \`!cmd add <gatilho> | <desc> | ai | Persona\`\nEx: \`!cmd add !regras | Mostra regras | fixed | Proibido spam!\`\n\n• \`!cmd remove <gatilho>\`\n• \`!cmd list\`\n\n0️⃣ Voltar` })
       return
     }
     if (msg === '5') {
-      state.customerStates[jid].flow = 'menu_links'
-      await safeSendMessage(sock, jid, { text: `*Links Permitidos*\n\n1️⃣ Permitir Domínio (Ex: youtube.com)\n2️⃣ Remover Domínio\n0️⃣ Voltar` })
+      state.customerStates[jid].flow = 'menu_help'
+      await safeSendMessage(sock, jid, { text: `🧑‍⚕️ *Módulo Pessoal*\n\nEnvie mensagens diárias de bom dia automaticamente para as pessoas importantes:\n\n• \`!pessoal perfil ...\` — Define quem o bot é em relação a você\n• \`!pessoal add <num> | <Nome e quem é>\` — Adiciona na lista\n• \`!pessoal remove <num>\`\n• \`!pessoal list\`\n\n0️⃣ Voltar` })
       return
     }
     if (msg === '6') {
-      state.customerStates[jid].flow = 'menu_auto'
-      await safeSendMessage(sock, jid, { text: `*Automação / Agenda*\n\n1️⃣ Novo Agendamento\n2️⃣ Listar Agendamentos\n3️⃣ Deletar Agendamento\n0️⃣ Voltar` })
+      state.customerStates[jid].flow = 'menu_help'
+      await safeSendMessage(sock, jid, { text: `⏰ *Lembretes*\n\nO bot te avisa ou avisa no grupo onde você agendar.\n\n• \`!lembrete add "Tomar remédio" 8h\`\n• \`!lembrete add "Reunião" 30m\`\n• \`!lembrete remove <id>\`\n• \`!lembrete lista\`\n\n0️⃣ Voltar` })
       return
     }
     if (msg === '7') {
-      state.customerStates[jid].flow = 'menu_mahito'
-      await safeSendMessage(sock, jid, { text: `*Identidade Mahito*\n\n1️⃣ Mudar Foto de Perfil\n2️⃣ Enviar Figurinha Mahito\n3️⃣ Adicionar Figurinha (enviar + categoria)\n4️⃣ Listar Figurinhas Salvas\n5️⃣ Remover Figurinha\n0️⃣ Voltar` })
+      state.customerStates[jid].flow = 'menu_msgs'
+      await safeSendMessage(sock, jid, { text: `*Mensagens Globais*\n\nEnvie para canais privados ou anuncie:\n\n1️⃣ Enviar DM Privada (Assistente)\n2️⃣ Enviar Comunicado Global (Assistente)\n0️⃣ Voltar` })
       return
     }
     if (msg === '8') {
-      state.customerStates[jid].flow = 'menu_sys'
-      await safeSendMessage(sock, jid, { text: `*Sistema*\n\n1️⃣ Reiniciar Bot\n2️⃣ Atualizar do GitHub\n3️⃣ Apagar meus DMs (Mantém grupos)\n4️⃣ Limpar Mensagens de Tudo\n5️⃣ DESLIGAR BOT (Shutdown)\n6️⃣ Fazer Backup Agora\n7️⃣ Enviar Relatório Semanal\n0️⃣ Voltar` })
+      state.customerStates[jid].flow = 'menu_sec'
+      await safeSendMessage(sock, jid, { text: `🛡️ *Proteção Global e Blacklist*\n\n1️⃣ Add/Rm Palavra Proibida\n2️⃣ Add/Rm Concorrente\n3️⃣ Add/Rm Domínio Permitido\n_Para ativar proteção num grupo, use a aba 2️⃣ Gerenciar Grupos._\n0️⃣ Voltar` })
       return
     }
+    if (msg === '9') {
+      state.customerStates[jid].flow = 'menu_auto'
+      await safeSendMessage(sock, jid, { text: `⚙️ *Automação e Agendamentos*\n\nTarefas autônomas já rodando:\n• 07:00 — Disparo Pessoal\n• 08:00 — Relatório Matinal\n\n1️⃣ Criar Lembrete / Agendamento\n2️⃣ Listar Agendamentos Antigos\n3️⃣ Deletar Agendamento Antigo\n0️⃣ Voltar` })
+      return
+    }
+    if (msg === '10' || msg === '10️⃣') {
+      state.customerStates[jid].flow = 'menu_sys'
+      await safeSendMessage(sock, jid, { text: `*Configurações do Sistema*\n\n1️⃣ Reiniciar Bot\n2️⃣ Atualizar do GitHub\n3️⃣ Apagar meus DMs (Mantém grupos)\n4️⃣ Limpar Mensagens de Tudo\n5️⃣ DESLIGAR BOT (Shutdown)\n6️⃣ Fazer Backup Agora\n7️⃣ Forçar Relatório Semanal\n8️⃣ Identidade Mahito (Foto/Figurinha)\n0️⃣ Voltar` })
+      return
+    }
+  }
+
+  // Generic Help menus fallback
+  if (sc.flow === 'menu_help') {
+    if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
+    await safeSendMessage(sock, jid, { text: 'Digite 0️⃣ para voltar ao painel principal.' })
+    return
   }
 
   // Menu Handling logic: Users
@@ -416,6 +435,13 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     }
     if (toggles[msg]) {
       const key = toggles[msg]
+      if (key === 'xp_enabled') {
+        state.customerStates[jid].flow = 'menu_group_xp'
+        const { getGroupXpConfig } = require('./xp')
+        const c = getGroupXpConfig(targetJid)
+        await safeSendMessage(sock, jid, { text: `🌟 *Sistema de XP: ${c.xp_enabled ? 'ATIVADO' : 'DESATIVADO'}*\n\n1️⃣ Ligar/Desligar Sistema\n2️⃣ XP por Mensagem: [${c.xp_por_mensagem}]\n3️⃣ Cooldown em seg: [${c.xp_cooldown_seg}]\n4️⃣ Fórmula de nível: [${c.nivel_formula}]\n5️⃣ Bônus Mídia: [${c.xp_bonus_midia}]\n6️⃣ Pen. Spam: [${c.xp_penalidade_spam}]\n7️⃣ Ranking Público: [${c.ranking_publico ? 'SIM' : 'NÃO'}]\n8️⃣ Ver Top Ranking\n\n0️⃣ Voltar pro Dashboard` })
+        return
+      }
       const current = getGroupConfig(targetJid)[key]
       setGroupConfig(targetJid, key, current ? 0 : 1)
       await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, targetJid) })
@@ -524,6 +550,67 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     }
     state.customerStates[jid].flow = 'menu_group_dashboard'
     await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
+    return
+  }
+
+  if (sc.flow === 'menu_group_xp') {
+    const targetJid = sc.selectedGroupJid
+    const { processXpCommand, getGroupXpConfig } = require('./xp')
+    const c = getGroupXpConfig(targetJid)
+    
+    if (msg === '0') {
+      state.customerStates[jid].flow = 'menu_group_dashboard'
+      await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, targetJid) })
+      return
+    }
+    if (msg === '1') {
+      const d = require('./db').getDB()
+      d.prepare('UPDATE group_xp_config SET xp_enabled = ? WHERE group_jid = ?').run(c.xp_enabled ? 0 : 1, getBaseJid(targetJid))
+      await safeSendMessage(sock, jid, { text: '✅ Status do XP alterado. Digite "0" para recarregar o menu.' })
+      return
+    }
+    if (msg === '7') {
+      const d = require('./db').getDB()
+      d.prepare('UPDATE group_xp_config SET ranking_publico = ? WHERE group_jid = ?').run(c.ranking_publico ? 0 : 1, getBaseJid(targetJid))
+      await safeSendMessage(sock, jid, { text: '✅ Visibilidade do Ranking alterada. Digite "0" para recarregar o menu.' })
+      return
+    }
+    if (msg === '8') {
+      await processXpCommand(sock, targetJid, jid, '!xp ranking', true)
+      return
+    }
+    const editMap = {
+      '2': { field: 'xp_por_mensagem', desc: 'novo XP base por texto' },
+      '3': { field: 'xp_cooldown_seg', desc: 'o cooldown em segundos' },
+      '4': { field: 'nivel_formula', desc: 'nova formula: linear, quadratica ou fibonacci' },
+      '5': { field: 'xp_bonus_midia', desc: 'bonus de XP em mídia' },
+      '6': { field: 'xp_penalidade_spam', desc: 'penalidade por violar limite spam' }
+    }
+    if (editMap[msg]) {
+      state.customerStates[jid].flow = 'menu_group_xp_edit'
+      state.customerStates[jid].xpEditField = editMap[msg].field
+      await safeSendMessage(sock, jid, { text: `💬 Digite ${editMap[msg].desc} (0 para cancelar):` })
+      return
+    }
+  }
+
+  if (sc.flow === 'menu_group_xp_edit') {
+    const targetJid = sc.selectedGroupJid
+    const field = sc.xpEditField
+    if (msg !== '0' && msg !== 'cancelar') {
+       const d = require('./db').getDB()
+       const numVal = isNaN(Number(msg)) && field !== 'nivel_formula' ? null : Number(msg)
+       if (field !== 'nivel_formula' && numVal === null) {
+         await safeSendMessage(sock, jid, { text: '❌ O valor precisa ser um número.' })
+       } else {
+         d.prepare(`UPDATE group_xp_config SET ${field} = ? WHERE group_jid = ?`).run(field === 'nivel_formula' ? msg.toLowerCase() : numVal, getBaseJid(targetJid))
+         await safeSendMessage(sock, jid, { text: `✅ Salvo com sucesso.` })
+       }
+    }
+    const { getGroupXpConfig } = require('./xp')
+    const c = getGroupXpConfig(targetJid)
+    state.customerStates[jid].flow = 'menu_group_xp'
+    await safeSendMessage(sock, jid, { text: `🌟 *Sistema de XP: ${c.xp_enabled ? 'ATIVADO' : 'DESATIVADO'}*\n\n1️⃣ Ligar/Desligar Sistema\n2️⃣ XP por Mensagem: [${c.xp_por_mensagem}]\n3️⃣ Cooldown em seg: [${c.xp_cooldown_seg}]\n4️⃣ Fórmula de nível: [${c.nivel_formula}]\n5️⃣ Bônus Mídia: [${c.xp_bonus_midia}]\n6️⃣ Pen. Spam: [${c.xp_penalidade_spam}]\n7️⃣ Ranking Público: [${c.ranking_publico ? 'SIM' : 'NÃO'}]\n8️⃣ Ver Top Ranking\n\n0️⃣ Voltar pro Dashboard` })
     return
   }
 
@@ -668,41 +755,44 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
 
   // Menu Handling logic: Sec
   if (sc.flow === 'menu_sec') {
-    if (['1', '2', '3', '4'].includes(msg)) {
-      state.customerStates[jid].action = `sec_${msg}`
+    if (['1', '2'].includes(msg)) {
+      state.customerStates[jid].action = msg === '1' ? 'sec_words' : 'sec_comps'
       state.customerStates[jid].flow = 'awaiting_sec_word'
-      await safeSendMessage(sock, jid, { text: '💬 Digite a palavra / nome do concorrente:' })
+      await safeSendMessage(sock, jid, { text: '💬 Digite o termo que quer ADICIONAR ou REMOVER (ele alterna automaticamente):' })
+      return
+    }
+    if (msg === '3') {
+      state.customerStates[jid].action = 'sec_links'
+      state.customerStates[jid].flow = 'awaiting_link'
+      await safeSendMessage(sock, jid, { text: '💬 Digite o domínio (ex: seudominio.com). Ele será adicionado ou removido alternadamente:' })
       return
     }
     if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
   }
 
   if (sc.flow === 'awaiting_sec_word') {
-    const word = raw.trim()
-    if (sc.action === 'sec_1') { config.instantBanWords.push(word); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Ban word: ${word}` }) }
-    if (sc.action === 'sec_2') { config.instantBanWords = config.instantBanWords.filter(w => normalize(w) !== normalize(word)); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Removida: ${word}` }) }
-    if (sc.action === 'sec_3') { config.competitorNames.push(word); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Concorrente: ${word}` }) }
-    if (sc.action === 'sec_4') { config.competitorNames = config.competitorNames.filter(w => normalize(w) !== normalize(word)); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Removido: ${word}` }) }
+    const word = normalize(raw.trim())
+    const config = loadConfig()
+    if (sc.action === 'sec_words') {
+      if (config.instantBanWords.map(normalize).includes(word)) { config.instantBanWords = config.instantBanWords.filter(w => normalize(w) !== word); await safeSendMessage(sock, jid, { text: `✅ Removida: ${word}` }) }
+      else { config.instantBanWords.push(raw.trim()); await safeSendMessage(sock, jid, { text: `✅ Adicionada: ${word}` }) }
+    }
+    if (sc.action === 'sec_comps') {
+      if (config.competitorNames.map(normalize).includes(word)) { config.competitorNames = config.competitorNames.filter(w => normalize(w) !== word); await safeSendMessage(sock, jid, { text: `✅ Removido: ${word}` }) }
+      else { config.competitorNames.push(raw.trim()); await safeSendMessage(sock, jid, { text: `✅ Adicionado: ${word}` }) }
+    }
+    saveConfig(config)
     state.customerStates[jid].flow = 'owner_menu'
     await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
     return
   }
 
-  // Menu Handling logic: Links
-  if (sc.flow === 'menu_links') {
-    if (msg === '1' || msg === '2') {
-      state.customerStates[jid].action = msg === '1' ? 'link_add' : 'link_rm'
-      state.customerStates[jid].flow = 'awaiting_link'
-      await safeSendMessage(sock, jid, { text: '💬 Digite o domínio (ex: seudominio.com):' })
-      return
-    }
-    if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
-  }
-
   if (sc.flow === 'awaiting_link') {
-    const word = raw.trim()
-    if (sc.action === 'link_add') { config.lightDomains.push(word); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Domínio permitido: ${word}` }) }
-    if (sc.action === 'link_rm') { config.lightDomains = config.lightDomains.filter(w => normalize(w) !== normalize(word)); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Removido: ${word}` }) }
+    const word = normalize(raw.trim())
+    const config = loadConfig()
+    if (config.lightDomains.map(normalize).includes(word)) { config.lightDomains = config.lightDomains.filter(w => normalize(w) !== word); await safeSendMessage(sock, jid, { text: `✅ Domínio removido: ${word}` }) }
+    else { config.lightDomains.push(raw.trim()); await safeSendMessage(sock, jid, { text: `✅ Domínio adicionado: ${word}` }) }
+    saveConfig(config)
     state.customerStates[jid].flow = 'owner_menu'
     await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
     return
@@ -1545,7 +1635,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
       const ctx = msg.message?.extendedTextMessage?.contextInfo
       const quoted = ctx?.quotedMessage
       if (msg.message.imageMessage) { await sendStickerFromMessage(sock, groupJid, msg, msg.key) }
-      else if (quoted?.imageMessage) { await sendStickerFromMessage(sock, groupJid, { message: quoted }, msg.key) }
+      else if (quoted?.imageMessage) { await sendStickerFromMessage(sock, groupJid, { key: msg.key, message: quoted }, msg.key) }
       else { await safeSendMessage(sock, groupJid, { text: '❌ Use !figurinha marcando uma imagem, ou envie com a imagem.' }) }
     } catch (err) {
       await safeSendMessage(sock, groupJid, { text: '❌ Erro ao criar figurinha. Certifique-se de que é uma imagem válida.' })
