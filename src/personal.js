@@ -28,7 +28,7 @@ Regras:
 
   try {
     const genAI = new GoogleGenerativeAI(geminiKey.value)
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash', systemInstruction })
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash', systemInstruction })
     const result = await model.generateContent({ contents: [{ role: 'user', parts: [{ text: `Escreva uma mensagem matinal para ${contactInfo.name} agora.` }] }] })
     return await result.response.text()
   } catch (err) {

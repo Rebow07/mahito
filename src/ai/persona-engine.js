@@ -14,7 +14,7 @@ Nunca diga que você é um bot ou uma IA, a menos que sua persona exija isso.`
 
 async function callGemini(keyObj, systemInstruction, history, userMessage) {
   const genAI = new GoogleGenerativeAI(keyObj.value)
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash', systemInstruction })
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash', systemInstruction })
   
   const contents = []
   for (const h of history) {
