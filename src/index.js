@@ -3,7 +3,8 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
-  Browsers
+  Browsers,
+  makeInMemoryStore
 } = require('@whiskeysockets/baileys')
 const P = require('pino')
 const qrcode = require('qrcode-terminal')
@@ -14,6 +15,13 @@ const { initTables, migrateFromJSON, addXP, getPermLevel, getGroupConfig, XP_PER
 const { loadConfig, isOwner } = require('./config')
 const { getText, getBaseJid, sleep, jidToNumber } = require('./utils')
 const logger = require('./logger')
+
+const store = makeInMemoryStore({ logger: P({ level: 'silent' }) })
+store.readFromFile('./session/baileys_store.json')
+setInterval(() => {
+  store.writeToFile('./session/baileys_store.json')
+}, 10_000)
+
 const { safeSendMessage } = require('./queue')
 const { handleModeration, handleGroupParticipantsUpdate } = require('./moderation')
 const {
@@ -118,6 +126,8 @@ async function connect() {
   console.log = (...args) => { if (!shouldSilence(args)) originalConsoleLog.apply(console, args) }
   console.error = (...args) => { if (!shouldSilence(args)) originalConsoleError.apply(console, args) }
 
+  store.bind(sock.ev)
+
   sock.ev.on('creds.update', saveCreds)
 
   sock.ev.on('connection.update', async (update) => {
@@ -180,8 +190,22 @@ async function connect() {
 
       const rawRemote = msg.key?.remoteJid || ''
       const remoteJid = rawRemote ? getBaseJid(rawRemote) : 'unknown'
-      const senderJid = getBaseJid(msg.key?.participant || msg.participant || rawRemote)
+      let senderJid = getBaseJid(msg.key?.participant || msg.participant || rawRemote)
       const messageType = msg.message ? Object.keys(msg.message)[0] : 'no-message'
+
+      // 1. Normalizar o senderJid: se terminar com @lid, buscar o número real correspondente na tabela de contatos do Baileys
+      // ou simplesmente extrair só os dígitos para comparação.
+      if (senderJid && senderJid.endsWith('@lid')) {
+        const contact = store.contacts[senderJid]
+        if (contact) {
+          // Se o contato já tiver mapeado o ID real (.id ou algo diferente de @lid)
+          // Na store do Baileys, o contact pode ter lid e id
+          if (contact.id && contact.id.endsWith('@s.whatsapp.net')) {
+            senderJid = getBaseJid(contact.id)
+            logger.info('index', `💡 Resolvido @lid ${senderJid} para ${contact.id}`)
+          }
+        }
+      }
 
       logger.info('index', 'Mensagem recebida: ' + JSON.stringify({ jid: remoteJid, type: messageType, from: senderJid, isFromMe: !!msg.key?.fromMe, evType: type, botReady: state.botReady }))
 
@@ -406,10 +430,17 @@ async function connect() {
           const { getPersona } = require('./db')
           const persona = getPersona(groupConfig.persona_id)
           if (persona && persona.ai_reply_enabled) {
-            const botNumber = currentConfig.phoneNumber
-            const botJid = `${botNumber}@s.whatsapp.net`
-            const mentioned = text.includes(`@${botNumber}`)
-            const quotedBot = msg.message?.extendedTextMessage?.contextInfo?.participant === botJid
+            // 3. Garantir que o persona-engine é chamado quando a mensagem vem de @lid (lid groups ou menção por lid)
+            const botLidJid = sock.user?.lid ? getBaseJid(sock.user.lid) : null
+            const botLidNumber = botLidJid ? jidToNumber(botLidJid) : null
+
+            const mentioned = text.includes(`@${botNumber}`) || (botLidNumber && text.includes(`@${botLidNumber}`))
+            const quotedParticipant = msg.message?.extendedTextMessage?.contextInfo?.participant
+            const quotedBot = quotedParticipant && (
+              quotedParticipant === botJid ||
+              (botLidJid && quotedParticipant === botLidJid) ||
+              (sock.user?.id && getBaseJid(quotedParticipant) === getBaseJid(sock.user.id))
+            )
 
             if (persona.ai_always_on || mentioned || quotedBot) {
               const { generateResponse } = require('./ai/persona-engine')
