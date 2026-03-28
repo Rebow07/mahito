@@ -53,21 +53,21 @@ async function connect() {
 
   const mahitoAscii = `
 \x1b[35m
-    __  ___      __    _ __       
-   /  |/  /___ _/ /_  (_) /_____ 
-  / /|_/ / __ \\/ __ \\/ / __/ __ \\
- / /  / / /_/ / / / / / /_/ /_/ /
-/_/  /_/\\__,_/_/ /_/_/\\__/\\____/ 
-                                 
-    "A alma vem antes do corpo..."
+  ======================================================
+    __  __   _   _  _ ___ _____ ___  
+   |  \\/  | /_\\ | || |_ _|_   _/ _ \\ 
+   | |\\/| |/ _ \\| __ || |  | || (_) |
+   |_|  |_/_/ \\_\\_||_|___| |_| \\___/ 
+   
+        [ BEM-VINDO AO MAHITO SYSTEM ]
+  ======================================================
 \x1b[0m
-\x1b[36m        [ MAHITO SYSTEM INITIALIZATION ]\x1b[0m
 `
   console.log(mahitoAscii)
   
-  process.stdout.write('\x1b[32m⏳ Inicializando componentes: [\x1b[0m')
+  process.stdout.write('\x1b[35m[Mahito]\x1b[0m Inicializando motores: [')
   for (let i = 0; i < 25; i++) {
-    process.stdout.write('\x1b[32m█\x1b[0m')
+    process.stdout.write('\x1b[35m#\x1b[0m')
     await sleep(40)
   }
   process.stdout.write('\x1b[32m] 100% Completo!\x1b[0m\n\n')

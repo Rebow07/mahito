@@ -65,18 +65,43 @@ function ownerPrivateMenu() {
     `🤖✨ *Mahito — Sistema de Controle*\n\n` +
     `  🧬 Status: 𝑶𝒏𝒍𝒊𝒏𝒆\n` +
     `  📊 Almas Processadas: [${almas}]\n\n` +
-    `*Painel Principal*\n` +
-    `1️⃣ Controle de Usuários\n` +
-    `2️⃣ Gerenciar Grupos\n` +
-    `3️⃣ Sistema de XP\n` +
-    `4️⃣ Comandos Dinâmicos\n` +
-    `5️⃣ Módulo Pessoal\n` +
-    `6️⃣ Lembretes\n` +
-    `7️⃣ Mensagens Globais e DMs\n` +
-    `8️⃣ Proteção Global\n` +
-    `9️⃣ Automação e Agendamentos\n` +
-    `🔟 Configurações do Sistema\n\n` +
-    `_Escolha uma das opções numéricas:_`
+    `Escolha uma categoria (digite o número):\n\n` +
+    `1️⃣ *Controle de Usuários*\n` +
+    `2️⃣ *Gerenciar Grupos*\n` +
+    `3️⃣ *Sistema de XP*\n` +
+    `4️⃣ *Comandos Dinâmicos*\n` +
+    `5️⃣ *Módulo Pessoal*\n` +
+    `6️⃣ *Lembretes*\n` +
+    `7️⃣ *Mensagens Globais e DMs*\n` +
+    `8️⃣ *Proteção Global*\n` +
+    `9️⃣ *Automação e Agendamentos*\n` +
+    `🔟 *Configurações do Sistema*\n` +
+    `0️⃣ *Sair do Menu*`
+  )
+}
+
+async function renderGroupXpDashboard(sock, groupJid) {
+  const { getGroupConfig, getGroupXpConfig } = require('./db')
+  const { getGroupMeta } = require('./group')
+  let meta = null
+  try { meta = await getGroupMeta(sock, groupJid) } catch (e) {}
+  const groupName = meta?.subject || 'Grupo Desconhecido'
+  const gc = getGroupConfig(groupJid)
+  const xc = getGroupXpConfig(groupJid)
+  
+  return (
+    `📊 *Dashboard XP: ${groupName}*\n` +
+    `🆔 ID: ${groupJid}\n\n` +
+    `1️⃣ Ativar/Desativar XP: *[${gc.xp_enabled ? 'ON' : 'OFF'}]*\n` +
+    `2️⃣ XP por mensagem: *[${xc.xp_per_message}]*\n` +
+    `3️⃣ Cooldown em segundos: *[${xc.xp_cooldown_seconds}s]*\n` +
+    `4️⃣ Fórmula de nível: *[${xc.level_formula}]*\n` +
+    `5️⃣ XP bônus mídia: *[${xc.media_bonus_xp}]*\n` +
+    `6️⃣ Penalidade spam: *[${xc.spam_penalty_xp}]*\n` +
+    `7️⃣ Ranking público*: *[${xc.ranking_public ? 'ON' : 'OFF'}]*\n` +
+    `8️⃣ Ver ranking atual do grupo\n` +
+    `0️⃣ Voltar\n\n` +
+    `*(Se público, !ranking funcionará p/ membros comuns)*`
   )
 }
 
@@ -289,52 +314,45 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       return
     }
     if (msg === '3') {
-      state.customerStates[jid].flow = 'menu_help'
-      await safeSendMessage(sock, jid, { text: `🌟 *Sistema de XP*\n\nComandos utilizáveis nos grupos:\n• \`!xp rank\` — Ver top 10 do grupo\n• \`!xp info\` — Configurações atuais do XP\n• \`!xp config <campo> <valor>\` — Ajustar valores do grupo\n\n_Para configurar fácil, vá em *2️⃣ Gerenciar Grupos > 4 > 11*_.\n\n0️⃣ Voltar` })
+      state.customerStates[jid].flow = 'menu_xp'
+      await safeSendMessage(sock, jid, { text: `*Sistema de XP*\n\nComandos geridos nos Grupos habilitados:\n- *!xp*: Ver próprio XP/Level\n- *!ranking*: Ver Top 50 do grupo\n- *!xp config [chave] [valor]*: Para admins alterarem XP por mensagem, penalidades, etc. \n\nPara ligar/desligar o XP vá na Opção 2 -> Dashboard do Grupo.\n\n0️⃣ Voltar` })
       return
     }
     if (msg === '4') {
-      state.customerStates[jid].flow = 'menu_help'
-      await safeSendMessage(sock, jid, { text: `⚡ *Comandos Dinâmicos*\n\nCrie respostas rápidas e comandos com IA num grupo específico!\n\n• \`!cmd add <gatilho> | <desc> | fixed | Texto\`\n• \`!cmd add <gatilho> | <desc> | ai | Persona\`\nEx: \`!cmd add !regras | Mostra regras | fixed | Proibido spam!\`\n\n• \`!cmd remove <gatilho>\`\n• \`!cmd list\`\n\n0️⃣ Voltar` })
+      state.customerStates[jid].flow = 'menu_commands'
+      await safeSendMessage(sock, jid, { text: `*Comandos Dinâmicos*\n\nComandos criados direto no chat do grupo (Admin/Dono):\n- *!cmd add [gatilho]*: Cria resposta guiada\n- *!cmd remove [gatilho]*: Remove comando\n- *!cmd list*: Lista comandos ativos no grupo\n- *!cmd ia [gatilho]*: Faz a IA gerir a resposta\n\n0️⃣ Voltar` })
       return
     }
     if (msg === '5') {
-      state.customerStates[jid].flow = 'menu_help'
-      await safeSendMessage(sock, jid, { text: `🧑‍⚕️ *Módulo Pessoal*\n\nEnvie mensagens diárias de bom dia automaticamente para as pessoas importantes:\n\n• \`!pessoal perfil ...\` — Define quem o bot é em relação a você\n• \`!pessoal add <num> | <Nome e quem é>\` — Adiciona na lista\n• \`!pessoal remove <num>\`\n• \`!pessoal list\`\n\n0️⃣ Voltar` })
+      state.customerStates[jid].flow = 'menu_personal'
+      await safeSendMessage(sock, jid, { text: `*Módulo Pessoal (Assistente)*\n\nMensagens personalizadas enviadas toda manhã!\n- *!pessoal perfil*: Descreve sua personalidade para a IA.\n- *!pessoal add/remove*: Gerencia sua lista de contatos do bom dia.\n- *!pessoal list*: Lista quem receberá as saudações.\n\n0️⃣ Voltar` })
       return
     }
     if (msg === '6') {
-      state.customerStates[jid].flow = 'menu_help'
-      await safeSendMessage(sock, jid, { text: `⏰ *Lembretes*\n\nO bot te avisa ou avisa no grupo onde você agendar.\n\n• \`!lembrete add "Tomar remédio" 8h\`\n• \`!lembrete add "Reunião" 30m\`\n• \`!lembrete remove <id>\`\n• \`!lembrete lista\`\n\n0️⃣ Voltar` })
+      state.customerStates[jid].flow = 'menu_reminders'
+      await safeSendMessage(sock, jid, { text: `*Lembretes Agendados*\n\nDefina alertas via IA natural em qualquer chat:\n- *!lembrete [assunto] em [tempo]*\nEx: "!lembrete tomar água em 30 min"\nEx: "!lembrete reunião todo dia às 15:00"\n- *!lembrete list*: Lista alertas.\n- *!lembrete remove [id]*: Cancela alerta.\n\n0️⃣ Voltar` })
       return
     }
     if (msg === '7') {
       state.customerStates[jid].flow = 'menu_msgs'
-      await safeSendMessage(sock, jid, { text: `*Mensagens Globais*\n\nEnvie para canais privados ou anuncie:\n\n1️⃣ Enviar DM Privada (Assistente)\n2️⃣ Enviar Comunicado Global (Assistente)\n0️⃣ Voltar` })
+      await safeSendMessage(sock, jid, { text: `*Mensagens Globais e DMs*\n\n1️⃣ Enviar DM Privada (Assistente)\n2️⃣ Enviar Comunicado Global (Assistente)\n0️⃣ Voltar` })
       return
     }
     if (msg === '8') {
       state.customerStates[jid].flow = 'menu_sec'
-      await safeSendMessage(sock, jid, { text: `🛡️ *Proteção Global e Blacklist*\n\n1️⃣ Add/Rm Palavra Proibida\n2️⃣ Add/Rm Concorrente\n3️⃣ Add/Rm Domínio Permitido\n_Para ativar proteção num grupo, use a aba 2️⃣ Gerenciar Grupos._\n0️⃣ Voltar` })
+      await safeSendMessage(sock, jid, { text: `*Proteção Global*\n\n1️⃣ Add Palavra Proibida\n2️⃣ Rm Palavra Proibida\n3️⃣ Add Concorrente\n4️⃣ Rm Concorrente\n5️⃣ Permitir Domínio Web (Whitelist)\n6️⃣ Remover Domínio Web\n0️⃣ Voltar` })
       return
     }
     if (msg === '9') {
       state.customerStates[jid].flow = 'menu_auto'
-      await safeSendMessage(sock, jid, { text: `⚙️ *Automação e Agendamentos*\n\nTarefas autônomas já rodando:\n• 07:00 — Disparo Pessoal\n• 08:00 — Relatório Matinal\n\n1️⃣ Criar Lembrete / Agendamento\n2️⃣ Listar Agendamentos Antigos\n3️⃣ Deletar Agendamento Antigo\n0️⃣ Voltar` })
+      await safeSendMessage(sock, jid, { text: `*Automação e Agendamentos*\n\n1️⃣ Novo Agendamento (Mensagem/Comando)\n2️⃣ Listar Agendamentos\n3️⃣ Deletar Agendamento\n0️⃣ Voltar` })
       return
     }
-    if (msg === '10' || msg === '10️⃣') {
+    if (msg === '10') {
       state.customerStates[jid].flow = 'menu_sys'
-      await safeSendMessage(sock, jid, { text: `*Configurações do Sistema*\n\n1️⃣ Reiniciar Bot\n2️⃣ Atualizar do GitHub\n3️⃣ Apagar meus DMs (Mantém grupos)\n4️⃣ Limpar Mensagens de Tudo\n5️⃣ DESLIGAR BOT (Shutdown)\n6️⃣ Fazer Backup Agora\n7️⃣ Forçar Relatório Semanal\n8️⃣ Identidade Mahito (Foto/Figurinha)\n0️⃣ Voltar` })
+      await safeSendMessage(sock, jid, { text: `*Configurações do Sistema*\n\n1️⃣ Reiniciar Bot\n2️⃣ Atualizar do GitHub\n3️⃣ Apagar meus DMs (Mantém grupos)\n4️⃣ Limpar Mensagens de Tudo\n5️⃣ DESLIGAR BOT (Shutdown)\n6️⃣ Fazer Backup Agora\n7️⃣ Enviar Relatório Semanal\n8️⃣ Identidade Mahito (Stickers/Foto)\n0️⃣ Voltar` })
       return
     }
-  }
-
-  // Generic Help menus fallback
-  if (sc.flow === 'menu_help') {
-    if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
-    await safeSendMessage(sock, jid, { text: 'Digite 0️⃣ para voltar ao painel principal.' })
-    return
   }
 
   // Menu Handling logic: Users
@@ -426,22 +444,19 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       '5': 'anti_competitor_enabled',
       '6': 'basic_commands_enabled',
       '7': 'welcome_enabled',
-      '11': 'xp_enabled',
       '12': 'leave_enabled',
       '16': 'anti_flood_media',
       '18': 'anti_nsfw_enabled',
       '19': 'auto_reply_enabled',
       '20': 'achievements_enabled'
     }
+    if (msg === '11') {
+      state.customerStates[jid].flow = 'menu_group_xp_dashboard'
+      await safeSendMessage(sock, jid, { text: await renderGroupXpDashboard(sock, targetJid) })
+      return
+    }
     if (toggles[msg]) {
       const key = toggles[msg]
-      if (key === 'xp_enabled') {
-        state.customerStates[jid].flow = 'menu_group_xp'
-        const { getGroupXpConfig } = require('./xp')
-        const c = getGroupXpConfig(targetJid)
-        await safeSendMessage(sock, jid, { text: `🌟 *Sistema de XP: ${c.xp_enabled ? 'ATIVADO' : 'DESATIVADO'}*\n\n1️⃣ Ligar/Desligar Sistema\n2️⃣ XP por Mensagem: [${c.xp_por_mensagem}]\n3️⃣ Cooldown em seg: [${c.xp_cooldown_seg}]\n4️⃣ Fórmula de nível: [${c.nivel_formula}]\n5️⃣ Bônus Mídia: [${c.xp_bonus_midia}]\n6️⃣ Pen. Spam: [${c.xp_penalidade_spam}]\n7️⃣ Ranking Público: [${c.ranking_publico ? 'SIM' : 'NÃO'}]\n8️⃣ Ver Top Ranking\n\n0️⃣ Voltar pro Dashboard` })
-        return
-      }
       const current = getGroupConfig(targetJid)[key]
       setGroupConfig(targetJid, key, current ? 0 : 1)
       await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, targetJid) })
@@ -513,6 +528,70 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     }
   }
 
+  // ─── Dashboard XP Hooks ───
+  if (sc.flow === 'menu_group_xp_dashboard') {
+    const targetJid = sc.selectedGroupJid
+    if (msg === '0') {
+      state.customerStates[jid].flow = 'menu_group_dashboard'
+      await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, targetJid) })
+      return
+    }
+    const { getGroupXpConfig, setGroupXpConfig, getGroupRanking } = require('./db')
+    
+    if (msg === '1') {
+      const current = getGroupConfig(targetJid).xp_enabled
+      setGroupConfig(targetJid, 'xp_enabled', current ? 0 : 1)
+      await safeSendMessage(sock, jid, { text: await renderGroupXpDashboard(sock, targetJid) })
+      return
+    }
+    if (msg === '7') {
+      const current = getGroupXpConfig(targetJid).ranking_public
+      setGroupXpConfig(targetJid, 'ranking_public', current ? 0 : 1)
+      await safeSendMessage(sock, jid, { text: await renderGroupXpDashboard(sock, targetJid) })
+      return
+    }
+    if (msg === '8') {
+      const ranking = getGroupRanking(targetJid, 10)
+      if (!ranking || !ranking.length) {
+         await safeSendMessage(sock, jid, { text: '🏆 Ranking vazio atualmente.' })
+         return
+      }
+      const lines = ranking.map((r, i) => `${i+1}. @${jidToNumber(r.user_id)} - Nível ${r.level} (${r.xp} XP)`)
+      await safeSendMessage(sock, jid, { text: `🏆 *Ranking Top 10*\n\n${lines.join('\n')}`, mentions: ranking.map(r => r.user_id) })
+      return
+    }
+    if (['2', '3', '4', '5', '6'].includes(msg)) {
+       const keys = { '2': 'xp_per_message', '3': 'xp_cooldown_seconds', '4': 'level_formula', '5': 'media_bonus_xp', '6': 'spam_penalty_xp' }
+       state.customerStates[jid].xpEditKey = keys[msg]
+       state.customerStates[jid].flow = 'awaiting_xp_config_value'
+       await safeSendMessage(sock, jid, { text: `💬 Digite o novo valor para *${keys[msg]}*:\n\n(Para fórmulas, digite: linear, quadratica ou fibonacci)` })
+       return
+    }
+  }
+
+  if (sc.flow === 'awaiting_xp_config_value') {
+    const targetJid = sc.selectedGroupJid
+    const key = sc.xpEditKey
+    const { setGroupXpConfig } = require('./db')
+    
+    let val = raw.trim()
+    if (key !== 'level_formula') {
+       val = parseInt(onlyDigits(val))
+       if (isNaN(val)) val = 0
+    } else {
+       if (!['linear', 'quadratica', 'fibonacci'].includes(val.toLowerCase())) {
+          val = 'linear'
+       } else {
+          val = val.toLowerCase()
+       }
+    }
+    setGroupXpConfig(targetJid, key, val)
+    await safeSendMessage(sock, jid, { text: `✅ Configuração ${key} atualizada para ${val}` })
+    state.customerStates[jid].flow = 'menu_group_xp_dashboard'
+    await safeSendMessage(sock, jid, { text: await renderGroupXpDashboard(sock, targetJid) })
+    return
+  }
+
   if (sc.flow === 'menu_group_perms') {
     if (msg === '0') { state.customerStates[jid].flow = 'menu_group_dashboard'; await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) }); return }
     if (msg === '1') {
@@ -550,67 +629,6 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     }
     state.customerStates[jid].flow = 'menu_group_dashboard'
     await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
-    return
-  }
-
-  if (sc.flow === 'menu_group_xp') {
-    const targetJid = sc.selectedGroupJid
-    const { processXpCommand, getGroupXpConfig } = require('./xp')
-    const c = getGroupXpConfig(targetJid)
-    
-    if (msg === '0') {
-      state.customerStates[jid].flow = 'menu_group_dashboard'
-      await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, targetJid) })
-      return
-    }
-    if (msg === '1') {
-      const d = require('./db').getDB()
-      d.prepare('UPDATE group_xp_config SET xp_enabled = ? WHERE group_jid = ?').run(c.xp_enabled ? 0 : 1, getBaseJid(targetJid))
-      await safeSendMessage(sock, jid, { text: '✅ Status do XP alterado. Digite "0" para recarregar o menu.' })
-      return
-    }
-    if (msg === '7') {
-      const d = require('./db').getDB()
-      d.prepare('UPDATE group_xp_config SET ranking_publico = ? WHERE group_jid = ?').run(c.ranking_publico ? 0 : 1, getBaseJid(targetJid))
-      await safeSendMessage(sock, jid, { text: '✅ Visibilidade do Ranking alterada. Digite "0" para recarregar o menu.' })
-      return
-    }
-    if (msg === '8') {
-      await processXpCommand(sock, targetJid, jid, '!xp ranking', true)
-      return
-    }
-    const editMap = {
-      '2': { field: 'xp_por_mensagem', desc: 'novo XP base por texto' },
-      '3': { field: 'xp_cooldown_seg', desc: 'o cooldown em segundos' },
-      '4': { field: 'nivel_formula', desc: 'nova formula: linear, quadratica ou fibonacci' },
-      '5': { field: 'xp_bonus_midia', desc: 'bonus de XP em mídia' },
-      '6': { field: 'xp_penalidade_spam', desc: 'penalidade por violar limite spam' }
-    }
-    if (editMap[msg]) {
-      state.customerStates[jid].flow = 'menu_group_xp_edit'
-      state.customerStates[jid].xpEditField = editMap[msg].field
-      await safeSendMessage(sock, jid, { text: `💬 Digite ${editMap[msg].desc} (0 para cancelar):` })
-      return
-    }
-  }
-
-  if (sc.flow === 'menu_group_xp_edit') {
-    const targetJid = sc.selectedGroupJid
-    const field = sc.xpEditField
-    if (msg !== '0' && msg !== 'cancelar') {
-       const d = require('./db').getDB()
-       const numVal = isNaN(Number(msg)) && field !== 'nivel_formula' ? null : Number(msg)
-       if (field !== 'nivel_formula' && numVal === null) {
-         await safeSendMessage(sock, jid, { text: '❌ O valor precisa ser um número.' })
-       } else {
-         d.prepare(`UPDATE group_xp_config SET ${field} = ? WHERE group_jid = ?`).run(field === 'nivel_formula' ? msg.toLowerCase() : numVal, getBaseJid(targetJid))
-         await safeSendMessage(sock, jid, { text: `✅ Salvo com sucesso.` })
-       }
-    }
-    const { getGroupXpConfig } = require('./xp')
-    const c = getGroupXpConfig(targetJid)
-    state.customerStates[jid].flow = 'menu_group_xp'
-    await safeSendMessage(sock, jid, { text: `🌟 *Sistema de XP: ${c.xp_enabled ? 'ATIVADO' : 'DESATIVADO'}*\n\n1️⃣ Ligar/Desligar Sistema\n2️⃣ XP por Mensagem: [${c.xp_por_mensagem}]\n3️⃣ Cooldown em seg: [${c.xp_cooldown_seg}]\n4️⃣ Fórmula de nível: [${c.nivel_formula}]\n5️⃣ Bônus Mídia: [${c.xp_bonus_midia}]\n6️⃣ Pen. Spam: [${c.xp_penalidade_spam}]\n7️⃣ Ranking Público: [${c.ranking_publico ? 'SIM' : 'NÃO'}]\n8️⃣ Ver Top Ranking\n\n0️⃣ Voltar pro Dashboard` })
     return
   }
 
@@ -755,44 +773,38 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
 
   // Menu Handling logic: Sec
   if (sc.flow === 'menu_sec') {
-    if (['1', '2'].includes(msg)) {
-      state.customerStates[jid].action = msg === '1' ? 'sec_words' : 'sec_comps'
+    if (['1', '2', '3', '4'].includes(msg)) {
+      state.customerStates[jid].action = `sec_${msg}`
       state.customerStates[jid].flow = 'awaiting_sec_word'
-      await safeSendMessage(sock, jid, { text: '💬 Digite o termo que quer ADICIONAR ou REMOVER (ele alterna automaticamente):' })
+      await safeSendMessage(sock, jid, { text: '💬 Digite a palavra / nome do concorrente:' })
       return
     }
-    if (msg === '3') {
-      state.customerStates[jid].action = 'sec_links'
+    if (msg === '5' || msg === '6') {
+      state.customerStates[jid].action = msg === '5' ? 'link_add' : 'link_rm'
       state.customerStates[jid].flow = 'awaiting_link'
-      await safeSendMessage(sock, jid, { text: '💬 Digite o domínio (ex: seudominio.com). Ele será adicionado ou removido alternadamente:' })
+      await safeSendMessage(sock, jid, { text: '💬 Digite o domínio (ex: seudominio.com):' })
       return
     }
     if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
   }
 
   if (sc.flow === 'awaiting_sec_word') {
-    const word = normalize(raw.trim())
-    const config = loadConfig()
-    if (sc.action === 'sec_words') {
-      if (config.instantBanWords.map(normalize).includes(word)) { config.instantBanWords = config.instantBanWords.filter(w => normalize(w) !== word); await safeSendMessage(sock, jid, { text: `✅ Removida: ${word}` }) }
-      else { config.instantBanWords.push(raw.trim()); await safeSendMessage(sock, jid, { text: `✅ Adicionada: ${word}` }) }
-    }
-    if (sc.action === 'sec_comps') {
-      if (config.competitorNames.map(normalize).includes(word)) { config.competitorNames = config.competitorNames.filter(w => normalize(w) !== word); await safeSendMessage(sock, jid, { text: `✅ Removido: ${word}` }) }
-      else { config.competitorNames.push(raw.trim()); await safeSendMessage(sock, jid, { text: `✅ Adicionado: ${word}` }) }
-    }
-    saveConfig(config)
+    const word = raw.trim()
+    if (sc.action === 'sec_1') { config.instantBanWords.push(word); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Ban word: ${word}` }) }
+    if (sc.action === 'sec_2') { config.instantBanWords = config.instantBanWords.filter(w => normalize(w) !== normalize(word)); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Removida: ${word}` }) }
+    if (sc.action === 'sec_3') { config.competitorNames.push(word); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Concorrente: ${word}` }) }
+    if (sc.action === 'sec_4') { config.competitorNames = config.competitorNames.filter(w => normalize(w) !== normalize(word)); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Removido: ${word}` }) }
     state.customerStates[jid].flow = 'owner_menu'
     await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
     return
   }
 
+
+
   if (sc.flow === 'awaiting_link') {
-    const word = normalize(raw.trim())
-    const config = loadConfig()
-    if (config.lightDomains.map(normalize).includes(word)) { config.lightDomains = config.lightDomains.filter(w => normalize(w) !== word); await safeSendMessage(sock, jid, { text: `✅ Domínio removido: ${word}` }) }
-    else { config.lightDomains.push(raw.trim()); await safeSendMessage(sock, jid, { text: `✅ Domínio adicionado: ${word}` }) }
-    saveConfig(config)
+    const word = raw.trim()
+    if (sc.action === 'link_add') { config.lightDomains.push(word); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Domínio permitido: ${word}` }) }
+    if (sc.action === 'link_rm') { config.lightDomains = config.lightDomains.filter(w => normalize(w) !== normalize(word)); saveConfig(config); await safeSendMessage(sock, jid, { text: `✅ Removido: ${word}` }) }
     state.customerStates[jid].flow = 'owner_menu'
     await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
     return
@@ -1008,6 +1020,16 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       await safeSendMessage(sock, jid, { text: `✅ ${groups.length} relatório(s) enviado(s).` })
       return
     }
+    if (msg === '8') {
+      state.customerStates[jid].flow = 'menu_mahito'
+      await safeSendMessage(sock, jid, { text: `*Identidade Mahito*\n\n1️⃣ Mudar Foto de Perfil\n2️⃣ Enviar Figurinha Mahito\n3️⃣ Adicionar Figurinha (enviar + categoria)\n4️⃣ Listar Figurinhas Salvas\n5️⃣ Remover Figurinha\n0️⃣ Voltar` })
+      return
+    }
+    if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
+  }
+
+  // Trivial handlers for info commands inside menu_commands/xp/reminders
+  if (['menu_xp', 'menu_commands', 'menu_personal', 'menu_reminders'].includes(sc.flow)) {
     if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
   }
 
