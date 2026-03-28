@@ -99,7 +99,7 @@ function ownerPrivateMenu() {
   )
 }
 
-async function renderGroupXpDashboard(sock, groupJid) {
+async function renderGroupXpDashboard(sock, groupJid, feedbackMsg = '') {
   const { getGroupConfig, getGroupXpConfig } = require('./db')
   const { getGroupMeta } = require('./group')
   let meta = null
@@ -108,7 +108,8 @@ async function renderGroupXpDashboard(sock, groupJid) {
   const gc = getGroupConfig(groupJid)
   const xc = getGroupXpConfig(groupJid)
   
-  return (
+  let header = feedbackMsg ? `${feedbackMsg}\n\n` : ''
+  return header + (
     `📊 *Dashboard XP: ${groupName}*\n` +
     `🆔 ID: ${groupJid}\n\n` +
     `1️⃣ Ativar/Desativar XP: *[${gc.xp_enabled ? 'ON' : 'OFF'}]*\n` +
@@ -124,13 +125,14 @@ async function renderGroupXpDashboard(sock, groupJid) {
   )
 }
 
-async function renderGroupDashboard(sock, groupJid) {
+async function renderGroupDashboard(sock, groupJid, feedbackMsg = '') {
   const gc = getGroupConfig(groupJid)
   const meta = await getGroupMeta(sock, groupJid)
   const groupName = meta?.subject || 'Grupo Desconhecido'
   const slowLabel = gc.slow_mode_seconds > 0 ? `${gc.slow_mode_seconds}s` : 'OFF'
 
-  return (
+  let header = feedbackMsg ? `${feedbackMsg}\n\n` : ''
+  return header + (
     `📊 *Dashboard: ${groupName}*\n` +
     `🆔 ID: ${groupJid}\n\n` +
     `1️⃣ Limite de Strikes: *[${gc.max_penalties}]*\n` +
@@ -462,17 +464,17 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     }
     // Toggles
     const toggles = {
-      '2': 'anti_link_enabled',
-      '3': 'anti_spam_enabled',
-      '4': 'anti_word_enabled',
-      '5': 'anti_competitor_enabled',
-      '6': 'basic_commands_enabled',
-      '7': 'welcome_enabled',
-      '12': 'leave_enabled',
-      '16': 'anti_flood_media',
-      '18': 'anti_nsfw_enabled',
-      '19': 'auto_reply_enabled',
-      '20': 'achievements_enabled'
+      '2': { key: 'anti_link_enabled', name: 'Anti-Link' },
+      '3': { key: 'anti_spam_enabled', name: 'Anti-Spam' },
+      '4': { key: 'anti_word_enabled', name: 'Anti-Palavrão' },
+      '5': { key: 'anti_competitor_enabled', name: 'Anti-Concorrente' },
+      '6': { key: 'basic_commands_enabled', name: 'Comandos p/ Membros' },
+      '7': { key: 'welcome_enabled', name: 'Boas-vindas' },
+      '12': { key: 'leave_enabled', name: 'Mensagem de Saída' },
+      '16': { key: 'anti_flood_media', name: 'Anti-Flood Mídia' },
+      '18': { key: 'anti_nsfw_enabled', name: 'Anti-NSFW' },
+      '19': { key: 'auto_reply_enabled', name: 'Auto-Respostas' },
+      '20': { key: 'achievements_enabled', name: 'Conquistas' }
     }
     if (msg === '11') {
       state.customerStates[jid].flow = 'menu_group_xp_dashboard'
@@ -480,10 +482,12 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       return
     }
     if (toggles[msg]) {
-      const key = toggles[msg]
-      const current = getGroupConfig(targetJid)[key]
-      setGroupConfig(targetJid, key, current ? 0 : 1)
-      await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, targetJid) })
+      const cfg = toggles[msg]
+      const current = getGroupConfig(targetJid)[cfg.key]
+      const newVal = current ? 0 : 1
+      setGroupConfig(targetJid, cfg.key, newVal)
+      const feedbackMsg = `✅ *${cfg.name}* foi *${newVal ? 'ATIVADO' : 'DESATIVADO'}*!`
+      await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, targetJid, feedbackMsg) })
       return
     }
     if (msg === '8') {
@@ -564,14 +568,18 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     
     if (msg === '1') {
       const current = getGroupConfig(targetJid).xp_enabled
-      setGroupConfig(targetJid, 'xp_enabled', current ? 0 : 1)
-      await safeSendMessage(sock, jid, { text: await renderGroupXpDashboard(sock, targetJid) })
+      const newVal = current ? 0 : 1
+      setGroupConfig(targetJid, 'xp_enabled', newVal)
+      const fb = `✅ *Sistema de XP* foi *${newVal ? 'ATIVADO' : 'DESATIVADO'}*!`
+      await safeSendMessage(sock, jid, { text: await renderGroupXpDashboard(sock, targetJid, fb) })
       return
     }
     if (msg === '7') {
       const current = getGroupXpConfig(targetJid).ranking_public
-      setGroupXpConfig(targetJid, 'ranking_public', current ? 0 : 1)
-      await safeSendMessage(sock, jid, { text: await renderGroupXpDashboard(sock, targetJid) })
+      const newVal = current ? 0 : 1
+      setGroupXpConfig(targetJid, 'ranking_public', newVal)
+      const fb = `✅ *Ranking Público* foi *${newVal ? 'ATIVADO' : 'DESATIVADO'}*!`
+      await safeSendMessage(sock, jid, { text: await renderGroupXpDashboard(sock, targetJid, fb) })
       return
     }
     if (msg === '8') {
@@ -610,9 +618,9 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
        }
     }
     setGroupXpConfig(targetJid, key, val)
-    await safeSendMessage(sock, jid, { text: `✅ Configuração ${key} atualizada para ${val}` })
     state.customerStates[jid].flow = 'menu_group_xp_dashboard'
-    await safeSendMessage(sock, jid, { text: await renderGroupXpDashboard(sock, targetJid) })
+    const fb = `✅ Configuração ${key} atualizada para ${val}`
+    await safeSendMessage(sock, jid, { text: await renderGroupXpDashboard(sock, targetJid, fb) })
     return
   }
 
@@ -626,49 +634,49 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     if (msg === '2') {
       const d = require('./db').getDB()
       d.prepare('UPDATE users_data SET perm_level = 0 WHERE group_id = ?').run(sc.selectedGroupJid)
-      await safeSendMessage(sock, jid, { text: '✅ Todas as permissões (VIP/MOD) deste grupo foram resetadas.' })
       state.customerStates[jid].flow = 'menu_group_dashboard'
-      await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
+      const fb = '✅ Todas as permissões (VIP/MOD) deste grupo foram resetadas.'
+      await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid, fb) })
       return
     }
   }
 
   if (sc.flow === 'awaiting_group_perm_promote') {
     const [num, lvl] = msg.split('|')
+    let fb = ''
     if (num && lvl) {
       const targetJid = jidToNumber(num) + '@s.whatsapp.net'
       setPermLevel(targetJid, sc.selectedGroupJid, parseInt(lvl))
-      await safeSendMessage(sock, jid, { text: `✅ Permissão de @${jidToNumber(targetJid)} alterada para Nível ${lvl}.`, mentions: [targetJid] })
+      fb = `✅ Permissão de @${jidToNumber(targetJid)} alterada para Nível ${lvl}.`
     }
     state.customerStates[jid].flow = 'menu_group_dashboard'
-    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
+    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid, fb) })
     return
   }
 
   if (sc.flow === 'awaiting_group_max_strikes') {
     const val = parseInt(onlyDigits(msg))
+    let fb = ''
     if (!isNaN(val)) {
       setGroupConfig(sc.selectedGroupJid, 'max_penalties', val)
-      await safeSendMessage(sock, jid, { text: '✅ Limite atualizado.' })
+      fb = '✅ Limite de strikes atualizado.'
     }
     state.customerStates[jid].flow = 'menu_group_dashboard'
-    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
+    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid, fb) })
     return
   }
 
   if (sc.flow === 'awaiting_group_welcome_text') {
     setGroupConfig(sc.selectedGroupJid, 'welcome_text', raw.trim())
-    await safeSendMessage(sock, jid, { text: '✅ Texto atualizado.' })
     state.customerStates[jid].flow = 'menu_group_dashboard'
-    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
+    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid, '✅ Texto de boas-vindas atualizado.') })
     return
   }
 
   if (sc.flow === 'awaiting_group_leave_text') {
     setGroupConfig(sc.selectedGroupJid, 'leave_text', raw.trim())
-    await safeSendMessage(sock, jid, { text: '✅ Texto de saída atualizado.' })
     state.customerStates[jid].flow = 'menu_group_dashboard'
-    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
+    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid, '✅ Texto de saída atualizado.') })
     return
   }
 
@@ -688,42 +696,45 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     const type = sc.targetType
     const groupJid = sc.selectedGroupJid
     const current = getBlacklist(groupJid, type)
+    let fb = ''
     if (current.includes(val)) {
       removeBlacklistItem(groupJid, type, val)
-      await safeSendMessage(sock, jid, { text: `✅ Removido da blacklist: ${val}` })
+      fb = `✅ Removido da blacklist: ${val}`
     } else {
       addBlacklistItem(groupJid, type, val)
-      await safeSendMessage(sock, jid, { text: `✅ Adicionado à blacklist: ${val}` })
+      fb = `✅ Adicionado à blacklist: ${val}`
     }
     state.customerStates[jid].flow = 'menu_group_dashboard'
-    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, groupJid) })
+    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, groupJid, fb) })
     return
   }
 
   // ─── Slow Mode Input ───
   if (sc.flow === 'awaiting_slow_mode') {
     const val = parseInt(onlyDigits(msg))
+    let fb = ''
     if (!isNaN(val)) {
       setGroupConfig(sc.selectedGroupJid, 'slow_mode_seconds', val)
-      await safeSendMessage(sock, jid, { text: val > 0 ? `✅ Modo Slow ativado: ${val} segundos entre mensagens.` : '✅ Modo Slow desativado.' })
+      fb = val > 0 ? `✅ Modo Slow ativado: ${val} segundos entre mensagens.` : '✅ Modo Slow desativado.'
     }
     state.customerStates[jid].flow = 'menu_group_dashboard'
-    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
+    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid, fb) })
     return
   }
 
   // ─── Alert Group Config ───
   if (sc.flow === 'awaiting_alert_group') {
     const val = raw.trim()
+    let fb = ''
     if (val === '0') {
       setGroupConfig(sc.selectedGroupJid, 'alert_group_jid', '')
-      await safeSendMessage(sock, jid, { text: '✅ Grupo de alertas removido.' })
+      fb = '✅ Grupo de alertas removido.'
     } else {
       setGroupConfig(sc.selectedGroupJid, 'alert_group_jid', val)
-      await safeSendMessage(sock, jid, { text: `✅ Grupo de alertas configurado: ${val}` })
+      fb = `✅ Grupo de alertas configurado: ${val}`
     }
     state.customerStates[jid].flow = 'menu_group_dashboard'
-    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
+    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid, fb) })
     return
   }
 
@@ -757,17 +768,17 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     const trigger = sc.autoReplyTrigger
     const response = raw.trim()
     const ok = addAutoReply(sc.selectedGroupJid, trigger, response)
-    await safeSendMessage(sock, jid, { text: ok ? `✅ Auto-resposta criada!\n"${trigger}" → ${response}` : '❌ Esse gatilho já existe.' })
+    const fb = ok ? `✅ Auto-resposta criada!\n"${trigger}" → ${response}` : '❌ Esse gatilho já existe.'
     state.customerStates[jid].flow = 'menu_group_dashboard'
-    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
+    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid, fb) })
     return
   }
 
   if (sc.flow === 'awaiting_auto_reply_remove') {
     removeAutoReply(sc.selectedGroupJid, raw.trim())
-    await safeSendMessage(sock, jid, { text: `✅ Auto-resposta removida: "${raw.trim()}"` })
+    const fb = `✅ Auto-resposta removida: "${raw.trim()}"`
     state.customerStates[jid].flow = 'menu_group_dashboard'
-    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid) })
+    await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid, fb) })
     return
   }
 
