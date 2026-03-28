@@ -41,7 +41,7 @@ async function sendMahitoSticker(sock, jid) {
   }
 }
 
-async function sendStickerFromMessage(sock, targetJid, sourceMsg, quotedKey) {
+async function sendStickerFromMessage(sock, targetJid, sourceMsg, quotedMsg) {
   try {
     // Debug log
     const msgKeys = Object.keys(sourceMsg?.message || {})
@@ -63,7 +63,7 @@ async function sendStickerFromMessage(sock, targetJid, sourceMsg, quotedKey) {
 
     await enqueueWA(
       `sticker:${targetJid}`,
-      () => sock.sendMessage(targetJid, { sticker: webp }, quotedKey ? { quoted: { key: quotedKey } } : {}),
+      () => sock.sendMessage(targetJid, { sticker: webp }, quotedMsg ? { quoted: quotedMsg } : {}),
       DELAYS.sticker
     )
   } catch (err) {
@@ -1809,10 +1809,10 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
 
       if (hasImage) {
         // Passa o msg ORIGINAL inteiro — downloadMediaMessage sabe desencapsular
-        await sendStickerFromMessage(sock, groupJid, msg, msg.key)
+        await sendStickerFromMessage(sock, groupJid, msg, msg)
       } else if (quoted?.imageMessage) {
         // Para quoted, monta a estrutura que o Baileys espera
-        await sendStickerFromMessage(sock, groupJid, { key: msg.key, message: quoted }, msg.key)
+        await sendStickerFromMessage(sock, groupJid, { key: msg.key, message: quoted }, msg)
       } else {
         await safeSendMessage(sock, groupJid, { text: '❌ Use !figurinha marcando uma imagem, ou envie com a imagem.' })
       }
