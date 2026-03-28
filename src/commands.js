@@ -43,14 +43,32 @@ async function sendMahitoSticker(sock, jid) {
 
 async function sendStickerFromMessage(sock, targetJid, sourceMsg, quotedKey) {
   try {
-    const media = await downloadMediaMessage(sourceMsg, 'buffer', {}, { logger: P({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage })
+    // Debug log
+    const msgKeys = Object.keys(sourceMsg?.message || {})
+    logger.info('sticker', `Processando sticker. Message keys: ${JSON.stringify(msgKeys)}`)
+
+    const media = await downloadMediaMessage(sourceMsg, 'buffer', {}, {
+      logger: P({ level: 'silent' }),
+      reuploadRequest: sock.updateMediaMessage
+    })
+
+    if (!media || !Buffer.isBuffer(media) || media.length === 0) {
+      throw new Error('downloadMediaMessage retornou buffer vazio ou inválido')
+    }
+
     const webp = await sharp(media)
       .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
       .webp({ quality: 80 })
       .toBuffer()
-    await enqueueWA(`sticker:${targetJid}`, () => sock.sendMessage(targetJid, { sticker: webp }, quotedKey ? { quoted: { key: quotedKey } } : {}), DELAYS.sticker)
+
+    await enqueueWA(
+      `sticker:${targetJid}`,
+      () => sock.sendMessage(targetJid, { sticker: webp }, quotedKey ? { quoted: { key: quotedKey } } : {}),
+      DELAYS.sticker
+    )
   } catch (err) {
     logger.error('sticker', `Erro ao gerar sticker: ${err.message}`)
+    logger.error('sticker', `Stack: ${err.stack}`)
     throw err
   }
 }
@@ -1782,9 +1800,22 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     try {
       const ctx = msg.message?.extendedTextMessage?.contextInfo
       const quoted = ctx?.quotedMessage
-      if (msg.message.imageMessage) { await sendStickerFromMessage(sock, groupJid, msg, msg.key) }
-      else if (quoted?.imageMessage) { await sendStickerFromMessage(sock, groupJid, { key: msg.key, message: quoted }, msg.key) }
-      else { await safeSendMessage(sock, groupJid, { text: '❌ Use !figurinha marcando uma imagem, ou envie com a imagem.' }) }
+
+      // Verifica se a própria mensagem contém imagem (em qualquer wrapper)
+      const hasImage = msg.message?.imageMessage
+        || msg.message?.ephemeralMessage?.message?.imageMessage
+        || msg.message?.viewOnceMessageV2?.message?.imageMessage
+        || msg.message?.viewOnceMessage?.message?.imageMessage
+
+      if (hasImage) {
+        // Passa o msg ORIGINAL inteiro — downloadMediaMessage sabe desencapsular
+        await sendStickerFromMessage(sock, groupJid, msg, msg.key)
+      } else if (quoted?.imageMessage) {
+        // Para quoted, monta a estrutura que o Baileys espera
+        await sendStickerFromMessage(sock, groupJid, { key: msg.key, message: quoted }, msg.key)
+      } else {
+        await safeSendMessage(sock, groupJid, { text: '❌ Use !figurinha marcando uma imagem, ou envie com a imagem.' })
+      }
     } catch (err) {
       await safeSendMessage(sock, groupJid, { text: '❌ Erro ao criar figurinha. Certifique-se de que é uma imagem válida.' })
       logger.error('commands', `Err sticker: ${err.message}`)
