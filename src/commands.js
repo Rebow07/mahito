@@ -20,7 +20,7 @@ const {
 const { normalize, onlyDigits, jidToNumber, getBaseJid, extractUrls, sleep, getText } = require('./utils')
 const logger = require('./logger')
 const { safeSendMessage, safeDelete, safeRemove, sendDiscordLog, enqueueWA } = require('./queue')
-const { getGroupName, getGroupMeta } = require('./group')
+const { getGroupName, getGroupMeta, isAdmin } = require('./group')
 const { sendStrikeWarning } = require('./moderation')
 const { enviarReacaoMahito } = require('./reactions')
 const { formatAchievementList, TOTAL_ACHIEVEMENTS } = require('./achievements')
@@ -1372,7 +1372,8 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
 
     const basicCommands = [
       '!ping', '!regras', '!status', '!idgrupo', '!se apresentar', '!apresentar',
-      '!meurank', '!rank', '!nivel', '!ranking', '!top', '!comandos'
+      '!meurank', '!rank', '!nivel', '!ranking', '!top', '!comandos',
+      '!perfil', '!conquistas'
     ]
     const isBasic = basicCommands.includes(cmd)
 
