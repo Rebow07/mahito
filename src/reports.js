@@ -1,7 +1,8 @@
 const { getWeeklyStats, getGroupRanking, getAllowedGroups } = require('./db')
 const { getGroupName } = require('./group')
 const { safeSendMessage } = require('./queue')
-const { jidToNumber, getBaseJid, logLocal } = require('./utils')
+const { jidToNumber, getBaseJid } = require('./utils')
+const logger = require('./logger')
 const { loadConfig } = require('./config')
 
 async function generateWeeklyReport(sock, groupJid) {
@@ -33,7 +34,7 @@ async function generateWeeklyReport(sock, groupJid) {
 
     return { text, mentions }
   } catch (err) {
-    logLocal(`[ERROR] generateWeeklyReport: ${err.message}`)
+    logger.error('reports', `generateWeeklyReport: ${err.message}`)
     return { text: '❌ Erro ao gerar relatório.', mentions: [] }
   }
 }
@@ -52,9 +53,9 @@ async function sendWeeklyReportsToOwner(sock) {
         await safeSendMessage(sock, ownerJid, { text: report.text, mentions: report.mentions }, {}, 3000)
       }
     }
-    logLocal('[REPORTS] Relatórios semanais enviados ao dono.')
+    logger.info('reports', 'Relatórios semanais enviados ao dono.')
   } catch (err) {
-    logLocal(`[ERROR] sendWeeklyReportsToOwner: ${err.message}`)
+    logger.error('reports', `sendWeeklyReportsToOwner: ${err.message}`)
   }
 }
 

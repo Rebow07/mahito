@@ -1,9 +1,14 @@
 node_modules/
 session/
 data/mahito.db
+data/mahito.db-shm
+data/*.db-shm
+data/mahito.db-wal
+data/*.db-wal
 logs/
 *.log
 .env
 data/nsfw_hashes/*
 !data/nsfw_hashes/.gitkeep
 backups/*.db
+backups/

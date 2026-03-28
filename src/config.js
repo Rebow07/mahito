@@ -1,3 +1,4 @@
+require('dotenv').config()
 const { PATHS } = require('./state')
 const { loadJson, saveJson } = require('./database')
 const { onlyDigits, jidToNumber } = require('./utils')
@@ -43,6 +44,30 @@ function loadConfig() {
   }
 
   const config = loadJson(PATHS.CONFIG_PATH, fallback)
+
+  // ── Sobrescrever campos sensíveis com variáveis de ambiente ──────────────
+  if (process.env.BOT_PHONE)
+    config.phoneNumber = process.env.BOT_PHONE
+
+  if (process.env.OWNER_NUMBERS)
+    config.ownerNumbers = process.env.OWNER_NUMBERS.split(',').map(n => n.trim()).filter(Boolean)
+
+  if (process.env.DISCORD_WEBHOOK_URL)
+    config.discordWebhookUrl = process.env.DISCORD_WEBHOOK_URL
+
+  if (process.env.GEMINI_KEY_1)
+    config.geminiKey1 = process.env.GEMINI_KEY_1
+
+  if (process.env.GEMINI_KEY_2)
+    config.geminiKey2 = process.env.GEMINI_KEY_2
+
+  if (process.env.GROQ_KEY)
+    config.groqKey = process.env.GROQ_KEY
+
+  if (process.env.BOOT_MESSAGE)
+    config.bootMessage = process.env.BOOT_MESSAGE
+  // ────────────────────────────────────────────────────────────────────────
+
   config.ownerNumbers = (config.ownerNumbers || []).map(onlyDigits).filter(Boolean)
   config.phoneNumber = onlyDigits(config.phoneNumber || fallback.phoneNumber)
   return { ...fallback, ...config }

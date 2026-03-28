@@ -2,7 +2,7 @@ const fs = require('fs')
 const path = require('path')
 const { execSync } = require('child_process')
 const { PATHS } = require('./state')
-const { logLocal } = require('./utils')
+const logger = require('./logger')
 
 const BACKUP_DIR = path.join(PATHS.ROOT, 'backups')
 const DB_PATH = path.join(PATHS.DATA_DIR, 'mahito.db')
@@ -21,19 +21,19 @@ function createBackup() {
 
   try {
     if (!fs.existsSync(DB_PATH)) {
-      logLocal('[BACKUP] Banco de dados não encontrado.')
+      logger.warn('backup', 'Banco de dados não encontrado.')
       return null
     }
 
     fs.copyFileSync(DB_PATH, backupPath)
-    logLocal(`[BACKUP] ✅ Backup criado: ${backupName}`)
+    logger.info('backup', `✅ Backup criado: ${backupName}`)
 
     // Limitar a MAX_BACKUPS
     cleanOldBackups()
 
     return backupPath
   } catch (err) {
-    logLocal(`[BACKUP] ❌ Erro ao criar backup: ${err.message}`)
+    logger.error('backup', `❌ Erro ao criar backup: ${err.message}`)
     return null
   }
 }
@@ -48,10 +48,10 @@ function cleanOldBackups() {
     while (files.length > MAX_BACKUPS) {
       const oldest = files.shift()
       fs.unlinkSync(path.join(BACKUP_DIR, oldest))
-      logLocal(`[BACKUP] 🗑️ Backup antigo removido: ${oldest}`)
+      logger.info('backup', `🗑️ Backup antigo removido: ${oldest}`)
     }
   } catch (err) {
-    logLocal(`[BACKUP] Erro ao limpar backups: ${err.message}`)
+    logger.error('backup', `Erro ao limpar backups: ${err.message}`)
   }
 }
 
@@ -62,15 +62,18 @@ function commitAndPushBackup() {
     try { execSync('git config user.email "mahito@bot.local"', { cwd: PATHS.ROOT, encoding: 'utf8' }) } catch {}
     try { execSync('git config pull.rebase false', { cwd: PATHS.ROOT, encoding: 'utf8' }) } catch {}
     
-    execSync('git add .', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 15000 })
+    execSync(
+      'git add src/ package.json package-lock.json .gitignore .env.example README.md',
+      { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 15000 }
+    )
     execSync('git commit -m "backup: auto-backup projeto completo + mahito.db"', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 15000 })
     // Pull first to merge remote changes, then push
     try { execSync('git pull --no-rebase', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 30000 }) } catch {}
     const pushOutput = execSync('git push', { cwd: PATHS.ROOT, encoding: 'utf8', timeout: 30000 })
-    logLocal(`[BACKUP] ✅ Push realizado: ${pushOutput.trim()}`)
+    logger.info('backup', `✅ Push realizado: ${pushOutput.trim()}`)
     return true
   } catch (err) {
-    logLocal(`[BACKUP] ⚠️ Erro no push: ${err.message}`)
+    logger.warn('backup', `⚠️ Erro no push: ${err.message}`)
     return false
   }
 }

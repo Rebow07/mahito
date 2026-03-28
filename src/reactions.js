@@ -2,7 +2,7 @@ const fs = require('fs')
 const path = require('path')
 const sharp = require('sharp')
 const { PATHS } = require('./state')
-const { logLocal } = require('./utils')
+const logger = require('./logger')
 const { enqueueWA } = require('./queue')
 const { DELAYS } = require('./state')
 const { getStickersByCategory } = require('./db')
@@ -46,7 +46,7 @@ async function enviarReacaoMahito(sock, jid, tipo) {
   if (!filePath) return false
 
   if (!fs.existsSync(filePath)) {
-    logLocal(`⚠️ GIF/Sticker não encontrado: ${filePath}`)
+    logger.warn('reactions', `GIF/Sticker não encontrado: ${filePath}`)
     return false
   }
 
@@ -92,7 +92,7 @@ async function enviarReacaoMahito(sock, jid, tipo) {
 
     return true
   } catch (err) {
-    logLocal(`Erro ao enviar reação Mahito: ${err.message || err}`)
+    logger.error('reactions', `Erro ao enviar reação Mahito: ${err.message || err}`)
     return false
   }
 }

@@ -17,7 +17,8 @@ const {
   XP_PER_LEVEL, getAutoReplies, addAutoReply, removeAutoReply,
   getUserAchievements, countAchievements, getInactiveMembers, trackUserActivity
 } = require('./db')
-const { normalize, onlyDigits, jidToNumber, logLocal, getBaseJid, extractUrls, sleep, getText } = require('./utils')
+const { normalize, onlyDigits, jidToNumber, getBaseJid, extractUrls, sleep, getText } = require('./utils')
+const logger = require('./logger')
 const { safeSendMessage, safeDelete, safeRemove, sendDiscordLog, enqueueWA } = require('./queue')
 const { getGroupName, getGroupMeta } = require('./group')
 const { sendStrikeWarning } = require('./moderation')
@@ -35,7 +36,7 @@ async function sendMahitoSticker(sock, jid) {
     await enqueueWA(`mahitoSticker:${jid}`, () => sock.sendMessage(jid, { sticker: fs.readFileSync(stickerPath) }), DELAYS.sticker)
     return true
   } catch (err) {
-    logLocal(`Erro ao enviar figurinha do Mahito: ${err.message || err}`)
+    logger.error('commands', `Erro ao enviar figurinha do Mahito: ${err.message || err}`)
     return false
   }
 }
@@ -217,7 +218,7 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
         count++
         await sleep(300)
       } catch (err) { 
-        logLocal(`Erro apagar ${k.jid}: ${err.message}`)
+        logger.error('commands', `Erro apagar ${k.jid}: ${err.message}`)
         const d = require('./db').getDB()
         d.prepare('DELETE FROM chat_history_keys WHERE jid = ?').run(k.jid)
       }
@@ -242,7 +243,7 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
         count++
         await sleep(300)
       } catch (err) { 
-        logLocal(`Erro limpar ${k.jid}: ${err.message}`)
+        logger.error('commands', `Erro limpar ${k.jid}: ${err.message}`)
         const d = require('./db').getDB()
         d.prepare('DELETE FROM chat_history_keys WHERE jid = ?').run(k.jid)
       }
@@ -1404,7 +1405,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
       await safeSendMessage(sock, targetJid, { text: textToSend, mentions: people }, {}, 3000)
       await safeSendMessage(sock, groupJid, { text: `✅ Mensagem enviada para ${targetJid} (Marcando ${people.length} pessoas)` })
     } catch (err) {
-      logLocal(`Erro enviartodos: ${err.message}`)
+      logger.error('commands', `Erro enviartodos: ${err.message}`)
       await safeSendMessage(sock, groupJid, { text: `❌ Erro: não foi possível enviar ou obter participantes do destino.` })
     }
     return true
@@ -1540,7 +1541,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
       else { await safeSendMessage(sock, groupJid, { text: 'Use !s em uma imagem.' }) }
     } catch (err) {
       await safeSendMessage(sock, groupJid, { text: 'Erro ao criar figurinha.' })
-      logLocal(`Err sticker: ${err.message}`)
+      logger.error('commands', `Err sticker: ${err.message}`)
     }
     return true
   }
@@ -1645,7 +1646,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
 
   return false
   } catch (err) {
-    logLocal(`[ERROR] handleGroupCommands: ${err.message}\n${err.stack}`)
+    logger.error('commands', `handleGroupCommands: ${err.message}`, { stack: err.stack })
     return false
   }
 }

@@ -1,5 +1,6 @@
 const { state, DELAYS } = require('./state')
-const { logLocal, sleep, isRateLimitError, getBaseJid } = require('./utils')
+const { sleep, isRateLimitError, getBaseJid } = require('./utils')
+const logger = require('./logger')
 
 async function getGroupMeta(sock, groupJid, forceRefresh = false) {
   const now = Date.now()
@@ -11,19 +12,19 @@ async function getGroupMeta(sock, groupJid, forceRefresh = false) {
   }
 
   try {
-    console.log(`[GROUP] Buscando metadata para ${groupJid}...`)
+    logger.debug('group', `Buscando metadata para ${groupJid}...`)
     const meta = await sock.groupMetadata(groupJid)
-    console.log(`[GROUP] Metadata recebida para ${groupJid}`)
+    logger.debug('group', `Metadata recebida para ${groupJid}`)
     state.groupMetaCache.set(groupJid, { data: meta, timestamp: now })
     return meta
   } catch (err) {
     if (isRateLimitError(err)) {
-      logLocal(`⚠️ Rate limit ao buscar metadata do grupo ${groupJid}.`)
+      logger.warn('group', `Rate limit ao buscar metadata do grupo ${groupJid}.`)
       if (cached?.data) return cached.data
       await sleep(DELAYS.metadataCooldownOnError)
       return null
     }
-    logLocal(`Erro metadata ${groupJid}: ${err.message}`)
+    logger.error('group', `Erro metadata ${groupJid}: ${err.message}`)
     if (cached?.data) return cached.data
     return null
   }

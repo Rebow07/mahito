@@ -2,7 +2,7 @@ const fs = require('fs')
 const path = require('path')
 const sharp = require('sharp')
 const { PATHS } = require('./state')
-const { logLocal } = require('./utils')
+const logger = require('./logger')
 
 const HASH_SIZE = 16 // 16x16 = 256-bit hash
 let cachedHashes = null
@@ -58,11 +58,11 @@ async function loadReferenceHashes() {
       const hash = await computeHash(buffer)
       hashes.push({ file, hash })
     } catch (err) {
-      logLocal(`[NSFW] Erro ao processar referência ${file}: ${err.message}`)
+      logger.error('nsfw', `Erro ao processar referência ${file}: ${err.message}`)
     }
   }
 
-  logLocal(`[NSFW] ${hashes.length} hash(es) de referência carregados.`)
+  logger.info('nsfw', `${hashes.length} hash(es) de referência carregados.`)
   return hashes
 }
 
@@ -109,7 +109,7 @@ async function checkNSFW(imageBuffer, threshold = 82) {
       matchedFile: bestMatch.file
     }
   } catch (err) {
-    logLocal(`[NSFW] Erro na verificação: ${err.message}`)
+    logger.error('nsfw', `Erro na verificação: ${err.message}`)
     return { match: false, similarity: 0, matchedFile: null }
   }
 }

@@ -12,7 +12,8 @@ const { PATHS, state } = require('./state')
 const { ensureFiles } = require('./database')
 const { initTables, migrateFromJSON, addXP, getPermLevel, getGroupConfig, XP_PER_LEVEL, upsertChatKey, trackUserActivity, incrementWeeklyStat, getAutoReplies } = require('./db')
 const { loadConfig, isOwner } = require('./config')
-const { logLocal, getText, getBaseJid, sleep, jidToNumber } = require('./utils')
+const { getText, getBaseJid, sleep, jidToNumber } = require('./utils')
+const logger = require('./logger')
 const { safeSendMessage } = require('./queue')
 const { handleModeration, handleGroupParticipantsUpdate } = require('./moderation')
 const {
@@ -70,8 +71,8 @@ async function connect() {
   }
   process.stdout.write('\x1b[32m] 100% Completo!\x1b[0m\n\n')
 
-  logLocal('=== Iniciando Mahito Bot ===')
-  try { migrateFromJSON() } catch (err) { logLocal(`Migração JSON: ${err.message}`) }
+  logger.info('index', '=== Iniciando Mahito Bot ===')
+  try { migrateFromJSON() } catch (err) { logger.warn('index', `Migração JSON: ${err.message}`) }
 
   const config = loadConfig()
   const { state: authState, saveCreds } = await useMultiFileAuthState(PATHS.SESSION_DIR)
@@ -117,18 +118,18 @@ async function connect() {
     }
 
     if (connection === 'connecting') {
-      logLocal('🔄 Conectando...')
+      logger.info('index', '🔄 Conectando...')
     }
 
     if (connection === 'open') {
-      logLocal(`✅ Bot conectado! Aguardando sincronização...`)
+      logger.info('index', `✅ Bot conectado! Aguardando sincronização...`)
       await sleep(5000)
       state.botReady = true
-      logLocal(`🟢 Bot pronto! Bot: ${config.phoneNumber} | Dono: ${config.ownerNumbers.join(', ')} | 🗄️ SQLite`)
+      logger.info('index', `🟢 Bot pronto! Bot: ${config.phoneNumber} | Dono: ${config.ownerNumbers.join(', ')} | 🗄️ SQLite`)
       scheduleAllMessages(sock)
       
       // Start web dashboard
-      try { const { startDashboard } = require('./dashboard'); startDashboard(sock) } catch (err) { logLocal(`[DASHBOARD] Erro: ${err.message}`) }
+      try { const { startDashboard } = require('./dashboard'); startDashboard(sock) } catch (err) { logger.error('index', `[DASHBOARD] Erro: ${err.message}`) }
 
       for (const ownerNumber of (config.ownerNumbers || [])) {
         const jid = `${ownerNumber}@s.whatsapp.net`
@@ -139,15 +140,15 @@ async function connect() {
     if (connection === 'close') {
       state.botReady = false
       const statusCode = lastDisconnect?.error?.output?.statusCode
-      logLocal(`❌ Conexão fechada. Código: ${statusCode}`)
+      logger.warn('index', `❌ Conexão fechada. Código: ${statusCode}`)
 
       if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
-        logLocal('🚪 Sessão encerrada. Apague a pasta session e conecte novamente.')
+        logger.warn('index', '🚪 Sessão encerrada. Apague a pasta session e conecte novamente.')
         return
       }
 
       setTimeout(() => {
-        connect().catch(err => logLocal(`Erro ao reconectar: ${err.message || err}`))
+        connect().catch(err => logger.error('index', `Erro ao reconectar: ${err.message || err}`))
       }, 8000)
     }
   })
@@ -175,7 +176,7 @@ async function connect() {
             msg.key.participant || msg.participant || undefined
           )
         } catch (dbErr) {
-          logLocal(`[ERROR] Falha no upsertChatKey: ${dbErr.message}`)
+          logger.error('index', `Falha no upsertChatKey: ${dbErr.message}`)
         }
       }
 
@@ -208,7 +209,7 @@ async function connect() {
             await processCustomerPrivate(sock, senderJid, text)
           }
         } catch (privErr) {
-          logLocal(`[ERROR] Falha ao processar mensagem privada: ${privErr.message}`)
+          logger.error('index', `Falha ao processar mensagem privada: ${privErr.message}`)
         }
         return
       }
@@ -224,7 +225,7 @@ async function connect() {
         trackUserActivity(senderJid, remoteJid)
         incrementWeeklyStat(remoteJid, 'total_messages')
       } catch (trackErr) {
-        logLocal(`[ERROR] Activity tracking: ${trackErr.message}`)
+        logger.error('index', `Activity tracking: ${trackErr.message}`)
       }
 
       // ─── Anti-NSFW Check (runs on image messages) ───
@@ -237,7 +238,7 @@ async function connect() {
             const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger: P({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage })
             const result = await checkNSFW(buffer)
             if (result.match) {
-              logLocal(`[NSFW] Imagem bloqueada de ${senderJid} no grupo ${remoteJid} (${result.similarity}% - ${result.matchedFile})`)
+              logger.warn('index', `[NSFW] Imagem bloqueada de ${senderJid} no grupo ${remoteJid} (${result.similarity}% - ${result.matchedFile})`)
               try { await sock.sendMessage(remoteJid, { delete: msg.key }) } catch {}
               const { addStrikeDB } = require('./db')
               const { sendStrikeWarning } = require('./moderation')
@@ -254,7 +255,7 @@ async function connect() {
           }
         }
       } catch (nsfwErr) {
-        logLocal(`[ERROR] Anti-NSFW: ${nsfwErr.message}`)
+        logger.error('index', `Anti-NSFW: ${nsfwErr.message}`)
       }
 
       if (!text) return
@@ -278,7 +279,7 @@ async function connect() {
           }
         }
       } catch (slowErr) {
-        logLocal(`[ERROR] Slow mode: ${slowErr.message}`)
+        logger.error('index', `Slow mode: ${slowErr.message}`)
       }
 
       // ─── XP System ───
@@ -311,7 +312,7 @@ async function connect() {
           }
         }
       } catch (xpErr) {
-        logLocal(`[ERROR] Falha no sistema de XP/Achievements: ${xpErr.message}`)
+        logger.error('index', `Falha no sistema de XP/Achievements: ${xpErr.message}`)
       }
 
       // ─── Auto-Reply System ───
@@ -328,7 +329,7 @@ async function connect() {
           }
         }
       } catch (arErr) {
-        logLocal(`[ERROR] Auto-reply: ${arErr.message}`)
+        logger.error('index', `Auto-reply: ${arErr.message}`)
       }
 
       // Group Commands
@@ -341,26 +342,25 @@ async function connect() {
            return
         }
       } catch (cmdErr) {
-        logLocal(`[ERROR] Falha nos comandos de grupo: ${cmdErr.message}`)
+        logger.error('index', `Falha nos comandos de grupo: ${cmdErr.message}`, { stack: cmdErr.stack })
       }
 
       // Moderation
       try {
         await handleModeration(sock, msg)
       } catch (modErr) {
-        logLocal(`[ERROR] Falha na moderação: ${modErr.message}`)
+        logger.error('index', `Falha na moderação: ${modErr.message}`)
       }
 
     } catch (criticalErr) {
-       logLocal(`[CRITICAL] Falha crítica no pipeline de mensagem: ${criticalErr.message}\n${criticalErr.stack}`)
+       logger.error('index', `Falha crítica no pipeline de mensagem: ${criticalErr.message}`, { stack: criticalErr.stack })
     }
   })
 }
 
-process.on('uncaughtException', (err) => logLocal(`Uncaught Exception: ${err.message || err}`))
-process.on('unhandledRejection', (reason) => logLocal(`Unhandled Rejection: ${reason}`))
-process.on('unhandledRejection', (err) => logLocal(`Unhandled Rejection: ${err.message || err}`))
+process.on('uncaughtException',  (err) => logger.error('process', `Uncaught Exception: ${err.message || err}`, { stack: err.stack }))
+process.on('unhandledRejection', (reason) => logger.error('process', `Unhandled Rejection: ${reason instanceof Error ? reason.message : reason}`))
 
 connect().catch(err => {
-  logLocal(`Erro fatal: ${err.message || err}`)
+  logger.error('process', `Erro fatal: ${err.message || err}`)
 })

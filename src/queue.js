@@ -1,6 +1,7 @@
 const axios = require('axios')
 const { state, DELAYS } = require('./state')
-const { logLocal, sleep, isRateLimitError } = require('./utils')
+const { sleep, isRateLimitError } = require('./utils')
+const logger = require('./logger')
 
 const MAX_RETRIES = 2
 
@@ -32,21 +33,21 @@ async function processWAQueue() {
       item.resolve(result)
     } catch (err) {
       if (isRateLimitError(err)) {
-        logLocal(`⚠️ Rate limit em ${item.name}. Aguardando 15s...`)
+        logger.warn('queue', `Rate limit em ${item.name}. Aguardando 15s...`)
         await sleep(15000)
         item.reject(err)
       } else if (isSessionError(err) && item.retries < MAX_RETRIES) {
         // Re-enqueue at the end with increased retry count
         item.retries++
-        logLocal(`🔄 Retry ${item.retries}/${MAX_RETRIES} para ${item.name} (session error)`)
+        logger.warn('queue', `Retry ${item.retries}/${MAX_RETRIES} para ${item.name} (session error)`)
         await sleep(3000)
         state.waQueue.push(item) // Put at end of queue
       } else {
         // Final failure — log once and resolve with null to not crash
         if (item.retries >= MAX_RETRIES) {
-          logLocal(`❌ Descartado após ${MAX_RETRIES} tentativas: ${item.name}`)
+          logger.error('queue', `Descartado após ${MAX_RETRIES} tentativas: ${item.name}`)
         } else {
-          logLocal(`Erro em ${item.name}: ${err.message || err}`)
+          logger.error('queue', `Erro em ${item.name}: ${err.message || err}`)
         }
         item.reject(err)
       }
@@ -97,7 +98,7 @@ async function sendDiscordLog(text, config) {
   try {
     await axios.post(config.discordWebhookUrl, { content: text }, { timeout: 15000 })
   } catch (err) {
-    logLocal(`Erro Discord: ${err.message}`)
+    logger.error('queue', `Erro Discord: ${err.message}`)
   }
 }
 

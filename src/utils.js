@@ -1,4 +1,3 @@
-const fs = require('fs')
 const { PATHS } = require('./state')
 
 function normalize(text = '') {
@@ -23,10 +22,10 @@ function getBaseJid(jid = '') {
   return `${user.split(':')[0]}@${domain}`
 }
 
+// logLocal: wrapper retrocompatível — delega ao logger de forma lazy para evitar circular require
 function logLocal(message) {
-  const line = `[${new Date().toISOString()}] ${message}`
-  fs.appendFileSync(PATHS.EVENTS_FILE, line + '\n', 'utf8')
-  console.log(message)
+  // eslint-disable-next-line global-require
+  require('./logger').logLocal(message)
 }
 
 function getText(message) {

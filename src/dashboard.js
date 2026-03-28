@@ -3,7 +3,8 @@ const os = require('os')
 const url = require('url')
 const { getDB, getAllowedGroups, getGroupConfig, getGroupRanking, getTotalUsers, getWeeklyStats } = require('./db')
 const { state } = require('./state')
-const { logLocal, getBaseJid, jidToNumber } = require('./utils')
+const { getBaseJid, jidToNumber } = require('./utils')
+const logger = require('./logger')
 
 function getLocalIP() {
   const interfaces = os.networkInterfaces()
@@ -187,14 +188,14 @@ function startDashboard(sock) {
 
   serverInstance.listen(PORT, '0.0.0.0', () => {
     const ip = getLocalIP()
-    logLocal(`[DASHBOARD] 🌐 Painel disponível em:`)
-    logLocal(`[DASHBOARD]    → Local:  http://localhost:${PORT}`)
-    logLocal(`[DASHBOARD]    → Rede:   http://${ip}:${PORT}`)
+    logger.info('dashboard', `🌐 Painel disponível em:`)
+    logger.info('dashboard', `   → Local:  http://localhost:${PORT}`)
+    logger.info('dashboard', `   → Rede:   http://${ip}:${PORT}`)
   })
 
   serverInstance.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') logLocal(`[DASHBOARD] ⚠️ Porta ${PORT} em uso.`)
-    else logLocal(`[DASHBOARD] Erro: ${err.message}`)
+    if (err.code === 'EADDRINUSE') logger.warn('dashboard', `⚠️ Porta ${PORT} em uso.`)
+    else logger.error('dashboard', `Erro: ${err.message}`)
   })
 }
 

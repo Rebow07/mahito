@@ -8,6 +8,7 @@ const {
   jidToNumber, getText, extractUrls, isLightLink,
   getBaseJid, normalize
 } = require('./utils')
+const logger = require('./logger')
 const { safeSendMessage, safeDelete, safeRemove, sendDiscordLog } = require('./queue')
 const { isAdmin, getGroupName } = require('./group')
 const { enviarReacaoMahito } = require('./reactions')
@@ -243,7 +244,7 @@ async function handleModeration(sock, msg) {
     }
 
   } catch (err) {
-    logLocal(`[ERROR] handleModeration: ${err.message}\n${err.stack}`)
+    logger.error('moderation', `handleModeration: ${err.message}`, { stack: err.stack })
   }
 }
 
