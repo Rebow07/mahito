@@ -3,8 +3,7 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
-  Browsers,
-  makeInMemoryStore
+  Browsers
 } = require('@whiskeysockets/baileys')
 const P = require('pino')
 const qrcode = require('qrcode-terminal')
@@ -16,11 +15,7 @@ const { loadConfig, isOwner } = require('./config')
 const { getText, getBaseJid, sleep, jidToNumber } = require('./utils')
 const logger = require('./logger')
 
-const store = makeInMemoryStore({ logger: P({ level: 'silent' }) })
-store.readFromFile('./session/baileys_store.json')
-setInterval(() => {
-  store.writeToFile('./session/baileys_store.json')
-}, 10_000)
+const lidToJid = new Map()
 
 const { safeSendMessage } = require('./queue')
 const { handleModeration, handleGroupParticipantsUpdate } = require('./moderation')
@@ -126,9 +121,26 @@ async function connect() {
   console.log = (...args) => { if (!shouldSilence(args)) originalConsoleLog.apply(console, args) }
   console.error = (...args) => { if (!shouldSilence(args)) originalConsoleError.apply(console, args) }
 
-  store.bind(sock.ev)
-
   sock.ev.on('creds.update', saveCreds)
+
+  sock.ev.on('contacts.upsert', (contacts) => {
+    for (const contact of contacts) {
+      if (contact.lid && contact.id && contact.id.endsWith('@s.whatsapp.net')) {
+        lidToJid.set(contact.lid, contact.id)
+      } else if (contact.id && contact.id.endsWith('@lid') && contact.phoneNumber) {
+        // Fallback case just in case Baileys structure differs
+        lidToJid.set(contact.id, `${contact.phoneNumber}@s.whatsapp.net`)
+      }
+    }
+  })
+
+  sock.ev.on('contacts.update', (contacts) => {
+    for (const contact of contacts) {
+      if (contact.lid && contact.id && contact.id.endsWith('@s.whatsapp.net')) {
+        lidToJid.set(contact.lid, contact.id)
+      }
+    }
+  })
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, qr, lastDisconnect } = update
@@ -196,14 +208,10 @@ async function connect() {
       // 1. Normalizar o senderJid: se terminar com @lid, buscar o número real correspondente na tabela de contatos do Baileys
       // ou simplesmente extrair só os dígitos para comparação.
       if (senderJid && senderJid.endsWith('@lid')) {
-        const contact = store.contacts[senderJid]
-        if (contact) {
-          // Se o contato já tiver mapeado o ID real (.id ou algo diferente de @lid)
-          // Na store do Baileys, o contact pode ter lid e id
-          if (contact.id && contact.id.endsWith('@s.whatsapp.net')) {
-            senderJid = getBaseJid(contact.id)
-            logger.info('index', `💡 Resolvido @lid ${senderJid} para ${contact.id}`)
-          }
+        const mapped = lidToJid.get(senderJid)
+        if (mapped) {
+          senderJid = getBaseJid(mapped)
+          logger.info('index', `💡 Resolvido @lid para ${senderJid}`)
         }
       }
 
