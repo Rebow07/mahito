@@ -438,6 +438,8 @@ async function connect() {
           const { getPersona } = require('./db')
           const persona = getPersona(groupConfig.persona_id)
           if (persona && persona.ai_reply_enabled) {
+            const botNumber = currentConfig.phoneNumber
+            const botJid = `${botNumber}@s.whatsapp.net`
             // 3. Garantir que o persona-engine é chamado quando a mensagem vem de @lid (lid groups ou menção por lid)
             const botLidJid = sock.user?.lid ? getBaseJid(sock.user.lid) : null
             const botLidNumber = botLidJid ? jidToNumber(botLidJid) : null

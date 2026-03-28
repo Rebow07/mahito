@@ -93,12 +93,15 @@ async function safeRemove(sock, groupJid, userJid) {
   }
 }
 
+let discordDisabled = false
+
 async function sendDiscordLog(text, config) {
-  if (!config.discordWebhookUrl) return
+  if (!config.discordWebhookUrl || discordDisabled) return
   try {
     await axios.post(config.discordWebhookUrl, { content: text }, { timeout: 15000 })
-  } catch (err) {
-    logger.error('queue', `Erro Discord: ${err.message}`)
+  } catch {
+    // Webhook inválido ou revogado — desabilita silenciosamente até o próximo restart
+    discordDisabled = true
   }
 }
 
