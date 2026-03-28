@@ -128,6 +128,10 @@ async function connect() {
       logger.info('index', `🟢 Bot pronto! Bot: ${config.phoneNumber} | Dono: ${config.ownerNumbers.join(', ')} | 🗄️ SQLite`)
       scheduleAllMessages(sock)
       
+      try { const { initPersonalScheduler } = require('./personal'); initPersonalScheduler() } catch(e) { logger.error('index', `Personal init: ${e.message}`) }
+      try { const { initReminderScheduler } = require('./scheduler'); initReminderScheduler(sock) } catch(e) { logger.error('index', `Scheduler init: ${e.message}`) }
+      try { const { scheduleDaily } = require('./reports'); scheduleDaily(sock) } catch(e) { logger.error('index', `Reports init: ${e.message}`) }
+
       // Start web dashboard
       try { const { startDashboard } = require('./dashboard'); startDashboard(sock) } catch (err) { logger.error('index', `[DASHBOARD] Erro: ${err.message}`) }
 
@@ -203,6 +207,18 @@ async function connect() {
       if (!remoteJid.endsWith('@g.us')) {
         try {
           if (isOwner(senderJid, currentConfig)) {
+            const { handlePersonalCommand } = require('./personal')
+            if (await handlePersonalCommand(text, sock, senderJid)) return
+            
+            if (text.trim() === '!testerelatorio') {
+              const { sendDailyReport } = require('./reports')
+              await sendDailyReport(sock)
+              return
+            }
+
+            const { processReminderCommand } = require('./scheduler')
+            if (await processReminderCommand(text, sock, senderJid, null)) return
+
             await processOwnerPrivate(sock, senderJid, text, msg)
           } else {
             if (!text) return
@@ -288,8 +304,10 @@ async function connect() {
         if (groupConfig) {
           const permLevel = getPermLevel(senderJid, remoteJid)
           if (groupConfig.xp_enabled && permLevel === 0 && text.length > 1) {
-            const result = addXP(senderJid, remoteJid)
-            if (result.leveledUp) {
+            const { processXp } = require('./xp')
+            const msgType = Object.keys(msg.message || {})[0] || 'conversation'
+            const result = processXp(senderJid, remoteJid, msgType)
+            if (result && result.leveledUp) {
               await safeSendMessage(sock, remoteJid, {
                 text: `⭐ @${jidToNumber(senderJid)} subiu para o *Nível ${result.newLevel}*! 🎉\nXP total: ${result.xp}`,
                 mentions: [senderJid]
@@ -337,10 +355,21 @@ async function connect() {
         const admin = await isAdmin(sock, remoteJid, senderJid)
         const isBotOwner = isOwner(senderJid, currentConfig)
         
-        const handled = await handleGroupCommands(sock, msg, text, remoteJid, senderJid, admin, isBotOwner)
-        if (handled) {
-           return
+        if (isBotOwner || admin) {
+          const { processXpCommand } = require('./xp')
+          if (await processXpCommand(sock, remoteJid, senderJid, text, true)) return
+          const { processSpamCommand } = require('./moderation')
+          if (await processSpamCommand(sock, remoteJid, senderJid, text, true)) return
+          const { processReminderCommand } = require('./scheduler')
+          if (await processReminderCommand(text, sock, senderJid, remoteJid)) return
         }
+
+        const { processCustomCommand } = require('./custom-commands')
+        const handledCustom = await processCustomCommand(text, remoteJid, senderJid, sock, isBotOwner || admin, state.recentGroupMessages[remoteJid])
+        if (handledCustom) return
+
+        const handled = await handleGroupCommands(sock, msg, text, remoteJid, senderJid, admin, isBotOwner)
+        if (handled) return
       } catch (cmdErr) {
         logger.error('index', `Falha nos comandos de grupo: ${cmdErr.message}`, { stack: cmdErr.stack })
       }
@@ -350,6 +379,30 @@ async function connect() {
         await handleModeration(sock, msg)
       } catch (modErr) {
         logger.error('index', `Falha na moderação: ${modErr.message}`)
+      }
+
+      // Persona Engine
+      try {
+        const groupConfig = getGroupConfig(remoteJid) || {}
+        if (groupConfig.persona_id) {
+          const { getPersona } = require('./db')
+          const persona = getPersona(groupConfig.persona_id)
+          if (persona && persona.ai_reply_enabled) {
+            const botNumber = currentConfig.phoneNumber
+            const botJid = `${botNumber}@s.whatsapp.net`
+            const mentioned = text.includes(`@${botNumber}`)
+            const quotedBot = msg.message?.extendedTextMessage?.contextInfo?.participant === botJid
+
+            if (persona.ai_always_on || mentioned || quotedBot) {
+              const { generateResponse } = require('./ai/persona-engine')
+              const history = state.recentGroupMessages[remoteJid] || []
+              const aiResp = await generateResponse(remoteJid, senderJid, text, history, persona, require('./db'))
+              await safeSendMessage(sock, remoteJid, { text: aiResp }, {}, 1500)
+            }
+          }
+        }
+      } catch (aiErr) {
+        logger.error('index', `Erro IA general reply: ${aiErr.message}`)
       }
 
     } catch (criticalErr) {

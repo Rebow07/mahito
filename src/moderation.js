@@ -58,18 +58,82 @@ function groupIsAllowed(jid) {
   return groups.includes(baseJid)
 }
 
-function trackMessageForSpam(userJid, groupConfig) {
-  if (!groupConfig.anti_spam_enabled) return false
+function getGroupSpamConfig(groupJid) {
+  const { getDB } = require('./db')
+  const d = getDB()
+  const gid = getBaseJid(groupJid)
+  let row = d.prepare('SELECT * FROM group_spam_config WHERE group_jid = ?').get(gid)
+  if (!row) {
+    d.prepare('INSERT OR IGNORE INTO group_spam_config (group_jid) VALUES (?)').run(gid)
+    row = d.prepare('SELECT * FROM group_spam_config WHERE group_jid = ?').get(gid)
+  }
+  return row
+}
+
+function checkSpam(userJid, groupJid) {
+  const config = getGroupSpamConfig(groupJid)
+  if (!config.enabled) return false
 
   const now = Date.now()
-  const max = Number(groupConfig.anti_spam_max || 5)
-  const interval = Number(groupConfig.anti_spam_interval || 60) * 1000
+  const max = Number(config.max_msgs || 5)
+  const interval = Number(config.intervalo_seg || 60) * 1000
+  const mapKey = `${userJid}:${groupJid}`
 
-  if (!state.messageTracker[userJid]) state.messageTracker[userJid] = []
-  state.messageTracker[userJid] = state.messageTracker[userJid].filter(ts => now - ts < interval)
-  state.messageTracker[userJid].push(now)
+  if (!state.messageTracker[mapKey]) state.messageTracker[mapKey] = []
+  
+  // Limpa ts antigos
+  state.messageTracker[mapKey] = state.messageTracker[mapKey].filter(ts => now - ts < interval)
+  state.messageTracker[mapKey].push(now)
 
-  return state.messageTracker[userJid].length > max
+  if (state.messageTracker[mapKey].length >= max) {
+    state.messageTracker[mapKey] = [] // Reset para não floodar as ações
+    return config.acao // 'warn', 'kick', etc
+  }
+
+  return false
+}
+
+async function processSpamCommand(sock, groupJid, senderJid, text, isOwnerOrAdmin) {
+  if (!text.startsWith('!spam')) return false
+  if (!isOwnerOrAdmin) {
+    await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins ou donos podem gerenciar o anti-spam.' })
+    return true
+  }
+
+  const { getDB } = require('./db')
+  const d = getDB()
+  const gid = getBaseJid(groupJid)
+  const args = text.split(' ')
+  const sub = args[1]?.toLowerCase()
+
+  if (sub === 'on' || sub === 'off') {
+    const v = sub === 'on' ? 1 : 0
+    d.prepare('UPDATE group_spam_config SET enabled = ? WHERE group_jid = ?').run(v, gid)
+    await safeSendMessage(sock, groupJid, { text: `✅ Anti-spam ${v ? 'ATIVADO' : 'DESATIVADO'}.` })
+    return true
+  }
+
+  if (sub === 'config') {
+    const field = args[2]
+    const val = args[3]
+    if (!field || !val) {
+      await safeSendMessage(sock, groupJid, { text: 'Uso: !spam config <campo> <valor>\nCampos: max_msgs, intervalo_seg, acao (warn/kick)' })
+      return true
+    }
+
+    const allowed = ['max_msgs', 'intervalo_seg', 'acao']
+    if (!allowed.includes(field)) {
+       await safeSendMessage(sock, groupJid, { text: `Campo inválido. Permitidos: ${allowed.join(', ')}` })
+       return true
+    }
+    
+    const finalVal = field === 'acao' ? val : Number(val)
+    d.prepare(`UPDATE group_spam_config SET ${field} = ? WHERE group_jid = ?`).run(finalVal, gid)
+    await safeSendMessage(sock, groupJid, { text: `✅ Config ${field} = ${val} atualizada.` })
+    return true
+  }
+
+  return false
 }
 
 async function sendStrikeWarning(sock, groupJid, userJid, count, max, reason) {
@@ -165,27 +229,55 @@ async function handleModeration(sock, msg) {
     const maxPenalties = groupConfig.max_penalties || 3
 
     // ─── Spam Detection ───
-    if (trackMessageForSpam(userJid, groupConfig)) {
-      await safeDelete(sock, groupJid, msg.key, userJid)
+    const spamAction = checkSpam(userJid, groupJid)
+    if (spamAction) {
+      // Registrar penalidade XP
+      try {
+        const { getDB } = require('./db')
+        const { getGroupXpConfig } = require('./xp')
+        const xpPenalty = getGroupXpConfig(groupJid)?.xp_penalidade_spam || 20
+        getDB().prepare('UPDATE users_data SET xp = MAX(0, xp - ?) WHERE user_id = ? AND group_id = ?').run(xpPenalty, userJid, groupJid)
+      } catch (e) {
+        logger.error('moderation', `Erro XP spam: ${e.message}`)
+      }
 
-      const now = Date.now()
-      const lastStrike = userStrikeLocks.get(userJid) || 0
-      if (now - lastStrike < 5000) return
-      userStrikeLocks.set(userJid, now)
+      if (spamAction === 'kick') {
+        const now = Date.now()
+        const lastStrike = userStrikeLocks.get(userJid) || 0
+        if (now - lastStrike > 5000) {
+           await safeRemove(sock, groupJid, userJid)
+           resetStrikesDB(userJid, groupJid)
+           await safeSendMessage(sock, groupJid, {
+             text: `💀 @${userNumber} foi removido instantaneamente por SPAM.`,
+             mentions: [userJid]
+           }, {}, 800, true)
+           userStrikeLocks.set(userJid, now)
+           await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
+           await sendDiscordLog(`🚫 **BAN POR SPAM**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}`, globalConfig)
+        }
+      } else { // warn
+        await safeDelete(sock, groupJid, msg.key, userJid)
 
-      const count = addStrikeDB(userJid, groupJid)
-      await sendStrikeWarning(sock, groupJid, userJid, count, maxPenalties, 'spam')
-      await sendDiscordLog(`⚠️ **SPAM DETECTADO**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}\n📊 Strikes: ${count}/${maxPenalties}`, globalConfig)
+        const now = Date.now()
+        const lastStrike = userStrikeLocks.get(userJid) || 0
+        if (now - lastStrike >= 5000) {
+          userStrikeLocks.set(userJid, now)
 
-      if (count >= maxPenalties) {
-        await safeRemove(sock, groupJid, userJid)
-        resetStrikesDB(userJid, groupJid)
-        await safeSendMessage(sock, groupJid, {
-          text: `💀 @${userNumber} caiu...\n\nMotivo: spam/excesso de mensagens\nHumanos que ignoram as regras sempre acabam assim.`,
-          mentions: [userJid]
-        }, {}, 800, true)
-        await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
-        await sendDiscordLog(`🚫 **BAN POR SPAM**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}`, globalConfig)
+          const count = addStrikeDB(userJid, groupJid)
+          await sendStrikeWarning(sock, groupJid, userJid, count, maxPenalties, 'spam')
+          await sendDiscordLog(`⚠️ **SPAM DETECTADO**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}\n📊 Strikes: ${count}/${maxPenalties}`, globalConfig)
+
+          if (count >= maxPenalties) {
+            await safeRemove(sock, groupJid, userJid)
+            resetStrikesDB(userJid, groupJid)
+            await safeSendMessage(sock, groupJid, {
+              text: `💀 @${userNumber} caiu...\n\nMotivo: spam/excesso de mensagens\nHumanos que ignoram as regras sempre acabam assim.`,
+              mentions: [userJid]
+            }, {}, 800, true)
+            await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
+            await sendDiscordLog(`🚫 **BAN POR SPAM**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}`, globalConfig)
+          }
+        }
       }
       return
     }
@@ -278,5 +370,6 @@ module.exports = {
   handleModeration,
   handleGroupParticipantsUpdate,
   sendStrikeWarning,
-  groupIsAllowed
+  groupIsAllowed,
+  processSpamCommand
 }

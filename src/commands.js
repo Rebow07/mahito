@@ -42,9 +42,17 @@ async function sendMahitoSticker(sock, jid) {
 }
 
 async function sendStickerFromMessage(sock, targetJid, sourceMsg, quotedKey) {
-  const media = await downloadMediaMessage(sourceMsg, 'buffer', {}, { logger: P({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage })
-  const webp = await sharp(media).webp().toBuffer()
-  await enqueueWA(`sticker:${targetJid}`, () => sock.sendMessage(targetJid, { sticker: webp }, quotedKey ? { quoted: { key: quotedKey } } : {}), DELAYS.sticker)
+  try {
+    const media = await downloadMediaMessage(sourceMsg, 'buffer', {}, { logger: P({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage })
+    const webp = await sharp(media)
+      .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      .webp({ quality: 80 })
+      .toBuffer()
+    await enqueueWA(`sticker:${targetJid}`, () => sock.sendMessage(targetJid, { sticker: webp }, quotedKey ? { quoted: { key: quotedKey } } : {}), DELAYS.sticker)
+  } catch (err) {
+    logger.error('sticker', `Erro ao gerar sticker: ${err.message}`)
+    throw err
+  }
 }
 
 // ─── Owner Menu ───
@@ -1531,16 +1539,16 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     return true
   }
 
-  // ─── !s / !sticker ───
-  if (cmd === '!s' || cmd === '!sticker') {
+  // ─── !s / !sticker / !figurinha ───
+  if (cmd === '!s' || cmd === '!sticker' || cmd === '!figurinha') {
     try {
       const ctx = msg.message?.extendedTextMessage?.contextInfo
       const quoted = ctx?.quotedMessage
       if (msg.message.imageMessage) { await sendStickerFromMessage(sock, groupJid, msg, msg.key) }
       else if (quoted?.imageMessage) { await sendStickerFromMessage(sock, groupJid, { message: quoted }, msg.key) }
-      else { await safeSendMessage(sock, groupJid, { text: 'Use !s em uma imagem.' }) }
+      else { await safeSendMessage(sock, groupJid, { text: '❌ Use !figurinha marcando uma imagem, ou envie com a imagem.' }) }
     } catch (err) {
-      await safeSendMessage(sock, groupJid, { text: 'Erro ao criar figurinha.' })
+      await safeSendMessage(sock, groupJid, { text: '❌ Erro ao criar figurinha. Certifique-se de que é uma imagem válida.' })
       logger.error('commands', `Err sticker: ${err.message}`)
     }
     return true

@@ -1,65 +1,70 @@
-const { getWeeklyStats, getGroupRanking, getAllowedGroups } = require('./db')
-const { getGroupName } = require('./group')
+const { getDB } = require('./db')
 const { safeSendMessage } = require('./queue')
-const { jidToNumber, getBaseJid } = require('./utils')
-const logger = require('./logger')
 const { loadConfig } = require('./config')
+const logger = require('./logger')
 
-async function generateWeeklyReport(sock, groupJid) {
-  try {
-    const stats = getWeeklyStats(groupJid)
-    const groupName = await getGroupName(sock, groupJid)
-    const top = getGroupRanking(groupJid, 3)
-    const botJid = getBaseJid(sock.user.id)
-    const filteredTop = top.filter(u => getBaseJid(u.user_id) !== botJid)
+async function sendDailyReport(sock) {
+  const d = getDB()
+  const config = loadConfig()
+  
+  const todayIso = new Date().toISOString().split('T')[0]
+  
+  // Aggregate stats from DB (Tokens)
+  const tokensRow = d.prepare('SELECT SUM(tokens_used) as total FROM token_usage WHERE date = ?').get(todayIso)
+  const tokensUsed = tokensRow?.total || 0
 
-    const topLine = filteredTop.length
-      ? filteredTop.map((u, i) => {
-          const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'
-          return `${medal} @${jidToNumber(u.user_id)} (${u.xp} XP)`
-        }).join('\n')
-      : 'Nenhum membro ativo essa semana.'
+  // Quick stats from global/memory or DB if easily accessible
+  // We don't have exact metrics for bans "today" easily unless added to a table.
+  // We'll approximate or send what we have.
+  const usersRow = d.prepare('SELECT COUNT(*) as c FROM users_data').get()
+  const usersCount = usersRow?.c || 0
+  
+  const groupsRow = d.prepare('SELECT COUNT(*) as c FROM groups_config').get()
+  const groupsCount = groupsRow?.c || 0
 
-    const mentions = filteredTop.map(u => getBaseJid(u.user_id))
+  const reportMsg = `📊 *Relatório Diário Mahito*\n\n` +
+    `🤖 *Uso de IA (Hoje)*: ${tokensUsed} tokens\n` +
+    `👥 *Grupos Monitorados*: ${groupsCount}\n` +
+    `👤 *Total de Usuários*: ${usersCount}\n\n` +
+    `Sistema operando normalmente. Para gerenciar comandos ou IA, utilize !cmd ou !spam.`
 
-    const text =
-      `📊 *RELATÓRIO SEMANAL*\n` +
-      `📋 *Grupo: ${groupName}*\n\n` +
-      `💬 Mensagens: ${stats?.total_messages || 0}\n` +
-      `👥 Membros novos: ${stats?.members_joined || 0}\n` +
-      `🚪 Saídas: ${stats?.members_left || 0}\n` +
-      `⚠️ Strikes: ${stats?.strikes_given || 0}\n` +
-      `🚫 Bans: ${stats?.bans_given || 0}\n\n` +
-      `🏆 *Top 3 Mais Ativos:*\n${topLine}`
-
-    return { text, mentions }
-  } catch (err) {
-    logger.error('reports', `generateWeeklyReport: ${err.message}`)
-    return { text: '❌ Erro ao gerar relatório.', mentions: [] }
+  for (const ownerNum of config.ownerNumbers) {
+    const ownerJid = `${ownerNum}@s.whatsapp.net`
+    await safeSendMessage(sock, ownerJid, { text: reportMsg })
   }
 }
 
-async function sendWeeklyReportsToOwner(sock) {
-  try {
-    const config = loadConfig()
-    const groups = getAllowedGroups()
-    if (!groups.length) return
+function scheduleDaily(sock) {
+  const now = new Date()
+  let target = new Date()
+  target.setHours(8, 0, 0, 0)
 
-    for (const ownerNumber of (config.ownerNumbers || [])) {
-      const ownerJid = `${ownerNumber}@s.whatsapp.net`
-
-      for (const groupJid of groups) {
-        const report = await generateWeeklyReport(sock, groupJid)
-        await safeSendMessage(sock, ownerJid, { text: report.text, mentions: report.mentions }, {}, 3000)
-      }
-    }
-    logger.info('reports', 'Relatórios semanais enviados ao dono.')
-  } catch (err) {
-    logger.error('reports', `sendWeeklyReportsToOwner: ${err.message}`)
+  if (now > target) {
+    target.setDate(target.getDate() + 1)
   }
+
+  const msToNext = target.getTime() - now.getTime()
+  
+  logger.info('reports', `Relatório diário agendado para rodar em ${Math.floor(msToNext / 1000 / 60)} min.`)
+
+  setTimeout(async () => {
+    try {
+      await sendDailyReport(sock)
+    } catch(err) {
+      logger.error('reports', `Falha ao enviar relatório: ${err.message}`)
+    }
+    // Set daily interval
+    setInterval(async () => {
+      try {
+        await sendDailyReport(sock)
+      } catch(err) {
+        logger.error('reports', `Falha ao enviar relatório diário: ${err.message}`)
+      }
+    }, 24 * 60 * 60 * 1000)
+  }, msToNext)
 }
 
 module.exports = {
-  generateWeeklyReport,
-  sendWeeklyReportsToOwner
+  sendDailyReport,
+  scheduleDaily
 }

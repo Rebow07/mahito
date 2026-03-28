@@ -132,6 +132,100 @@ function initTables() {
       category TEXT NOT NULL,
       added_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS personas (
+      persona_id TEXT PRIMARY KEY,
+      name TEXT, tone TEXT, ai_system_prompt TEXT,
+      expression_ban TEXT, expression_strike TEXT,
+      expression_welcome TEXT, expression_leave TEXT,
+      welcome_text TEXT, ban_phrase TEXT, strike_phrases TEXT,
+      sticker_on_ban INTEGER DEFAULT 0, sticker_path TEXT,
+      ai_reply_enabled INTEGER DEFAULT 0, ai_always_on INTEGER DEFAULT 0,
+      max_response_lines INTEGER DEFAULT 3,
+      daily_token_limit INTEGER DEFAULT 50000, per_user_limit INTEGER DEFAULT 5000
+    );
+
+    CREATE TABLE IF NOT EXISTS token_usage (
+      group_jid TEXT, date TEXT, tokens_used INTEGER,
+      PRIMARY KEY (group_jid, date)
+    );
+
+    CREATE TABLE IF NOT EXISTS group_xp_config (
+      group_jid TEXT PRIMARY KEY,
+      xp_por_mensagem INTEGER DEFAULT 5,
+      xp_cooldown_seg INTEGER DEFAULT 60,
+      xp_multiplicador REAL DEFAULT 1.0,
+      xp_bonus_midia INTEGER DEFAULT 10,
+      xp_penalidade_spam INTEGER DEFAULT 20,
+      nivel_formula TEXT DEFAULT 'linear',
+      ranking_publico INTEGER DEFAULT 1
+    );
+
+    CREATE TABLE IF NOT EXISTS custom_commands (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_jid TEXT NOT NULL,
+      trigger_word TEXT NOT NULL,
+      description TEXT,
+      response_type TEXT DEFAULT 'fixed',
+      fixed_text TEXT,
+      active INTEGER DEFAULT 1
+    );
+
+    CREATE TABLE IF NOT EXISTS group_spam_config (
+      group_jid TEXT PRIMARY KEY,
+      max_msgs INTEGER DEFAULT 5,
+      intervalo_seg INTEGER DEFAULT 60,
+      acao TEXT DEFAULT 'warn',
+      enabled INTEGER DEFAULT 1
+    );
+
+    CREATE TABLE IF NOT EXISTS personal_profile (
+      id INTEGER PRIMARY KEY,
+      profile TEXT,
+      updated_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS personal_contacts (
+      jid TEXT PRIMARY KEY,
+      relationship TEXT,
+      name TEXT,
+      notes TEXT,
+      active INTEGER DEFAULT 1
+    );
+
+    CREATE TABLE IF NOT EXISTS personal_sent_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      jid TEXT,
+      message TEXT,
+      sent_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS reminders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_jid TEXT,
+      group_jid TEXT,
+      titulo TEXT,
+      datetime_alvo TEXT,
+      recorrencia TEXT DEFAULT 'none',
+      notif_min INTEGER DEFAULT 0,
+      active INTEGER DEFAULT 1,
+      last_sent TEXT
+    );
+
+    INSERT OR IGNORE INTO personas (persona_id, name, tone, ai_system_prompt, ai_reply_enabled, ai_always_on) VALUES 
+    ('mahito-padrao', 'Mahito', 'Sarcástico e direto', 'Você é o Mahito, vilão de Jujutsu Kaisen. Odeia a fragilidade humana e sempre responde de forma um tanto sádica.', 1, 0),
+    ('kelvin-pessoal', 'Kelvin', 'Informal e carinhoso', 'Sou o Kelvin (Rebow), pai de família, tenho TDAH, gosto de música pesada (BMTH) e amo meus ratos e meu bull terrier.', 1, 0),
+    ('profissional', 'Rebow', 'Formal e objetivo', 'Você é o assistente comercial oficial da Creation Chronos, formal e educado.', 1, 0),
+    ('zoeira', 'Zoião', 'Engraçado e zoeiro', 'Você é zoeiro, fala gírias de internet e não leva nada a sério.', 1, 0);
+
+    INSERT OR IGNORE INTO personal_contacts (jid, relationship, name, notes) VALUES 
+    ('5517988400805@s.whatsapp.net', 'Esposa', 'Thaylla', ''),
+    ('5517988006269@s.whatsapp.net', 'Pai', 'Wagner', ''),
+    ('5517988219968@s.whatsapp.net', 'Mãe', 'Maria Helena', ''),
+    ('18623065084@s.whatsapp.net', 'Irmã', 'Késia', 'mora nos EUA'),
+    ('5517988300498@s.whatsapp.net', 'Irmã', 'Katlen', ''),
+    ('5517991005139@s.whatsapp.net', 'Irmão', 'Kleber', ''),
+    ('5517992246010@s.whatsapp.net', 'Filho', 'Bernardo', '');
   `)
 
   // ─── Migrations (safe for existing DBs) ───
@@ -153,7 +247,9 @@ function initTables() {
     "ALTER TABLE groups_config ADD COLUMN alert_group_jid TEXT DEFAULT ''",
     'ALTER TABLE users_data ADD COLUMN first_seen INTEGER DEFAULT 0',
     'ALTER TABLE users_data ADD COLUMN last_message_at INTEGER DEFAULT 0',
-    'ALTER TABLE users_data ADD COLUMN total_messages INTEGER DEFAULT 0'
+    'ALTER TABLE users_data ADD COLUMN total_messages INTEGER DEFAULT 0',
+    "ALTER TABLE groups_config ADD COLUMN persona_id TEXT DEFAULT 'mahito-padrao'",
+    'ALTER TABLE users_data ADD COLUMN last_xp_at TEXT'
   ]
   for (const sql of migrations) {
     try { d.exec(sql) } catch {}
@@ -185,7 +281,7 @@ function setGroupConfig(groupId, key, value) {
     'xp_enabled', 'leave_text',
     'anti_flood_media', 'anti_flood_media_max', 'anti_flood_media_interval',
     'slow_mode_seconds', 'anti_nsfw_enabled', 'auto_reply_enabled',
-    'achievements_enabled', 'alert_group_jid'
+    'achievements_enabled', 'alert_group_jid', 'persona_id'
   ]
   if (!allowed.includes(key)) return false
   d.prepare('INSERT OR IGNORE INTO groups_config (group_id) VALUES (?)').run(gid)
@@ -581,5 +677,29 @@ module.exports = {
   getStickersByCategory,
   addStickerDB,
   removeStickerDB,
-  listAllStickers
+  listAllStickers,
+  getPersona,
+  getTokenUsage,
+  addTokenUsage
+}
+
+// ─── AI Persona & Token Usage ───
+
+function getPersona(personaId) {
+  const d = getDB()
+  return d.prepare('SELECT * FROM personas WHERE persona_id = ?').get(personaId) || d.prepare("SELECT * FROM personas WHERE persona_id = 'mahito-padrao'").get()
+}
+
+function getTokenUsage(groupJid, dateIso) {
+  const d = getDB()
+  const gid = getBaseJid(groupJid)
+  const row = d.prepare('SELECT tokens_used FROM token_usage WHERE group_jid = ? AND date = ?').get(gid, dateIso)
+  return row ? row.tokens_used : 0
+}
+
+function addTokenUsage(groupJid, dateIso, tokensAmount) {
+  const d = getDB()
+  const gid = getBaseJid(groupJid)
+  d.prepare('INSERT OR IGNORE INTO token_usage (group_jid, date, tokens_used) VALUES (?, ?, 0)').run(gid, dateIso)
+  d.prepare('UPDATE token_usage SET tokens_used = tokens_used + ? WHERE group_jid = ? AND date = ?').run(tokensAmount, gid, dateIso)
 }
