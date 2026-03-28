@@ -398,6 +398,44 @@ function getGroupRanking(groupId, limit = 10) {
   return d.prepare('SELECT * FROM users_data WHERE group_id = ? ORDER BY xp DESC LIMIT ?').all(gid, limit)
 }
 
+function getGroupXpConfig(groupId) {
+  const d = getDB()
+  const gid = getBaseJid(groupId)
+  let row = d.prepare('SELECT * FROM group_xp_config WHERE group_jid = ?').get(gid)
+  if (!row) {
+    d.prepare('INSERT OR IGNORE INTO group_xp_config (group_jid) VALUES (?)').run(gid)
+    row = d.prepare('SELECT * FROM group_xp_config WHERE group_jid = ?').get(gid)
+  }
+  return {
+    xp_per_message: row.xp_por_mensagem,
+    xp_cooldown_seconds: row.xp_cooldown_seg,
+    xp_multiplier: row.xp_multiplicador,
+    media_bonus_xp: row.xp_bonus_midia,
+    spam_penalty_xp: row.xp_penalidade_spam,
+    level_formula: row.nivel_formula,
+    ranking_public: row.ranking_publico
+  }
+}
+
+function setGroupXpConfig(groupId, key, value) {
+  const d = getDB()
+  const gid = getBaseJid(groupId)
+  const map = {
+    'xp_per_message': 'xp_por_mensagem',
+    'xp_cooldown_seconds': 'xp_cooldown_seg',
+    'xp_multiplier': 'xp_multiplicador',
+    'media_bonus_xp': 'xp_bonus_midia',
+    'spam_penalty_xp': 'xp_penalidade_spam',
+    'level_formula': 'nivel_formula',
+    'ranking_public': 'ranking_publico'
+  }
+  const col = map[key]
+  if (!col) return false
+  d.prepare('INSERT OR IGNORE INTO group_xp_config (group_jid) VALUES (?)').run(gid)
+  d.prepare(`UPDATE group_xp_config SET ${col} = ? WHERE group_jid = ?`).run(value, gid)
+  return true
+}
+
 // ─── Blacklists ───
 
 function getBlacklist(groupId, type) {
@@ -677,6 +715,8 @@ module.exports = {
   setPermLevel,
   addXP,
   getGroupRanking,
+  getGroupXpConfig,
+  setGroupXpConfig,
   getTotalUsers,
   getBlacklist,
   addBlacklistItem,
