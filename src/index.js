@@ -17,7 +17,7 @@ const logger = require('./logger')
 
 const lidToJid = new Map()
 
-const { safeSendMessage } = require('./queue')
+const transport = require('./transport/whatsapp')
 const transport = require('./transport/whatsapp')
 const { handleModeration, handleGroupParticipantsUpdate } = require('./moderation')
 const {
@@ -171,7 +171,7 @@ async function connect() {
 
       for (const ownerNumber of (config.ownerNumbers || [])) {
         const jid = `${ownerNumber}@s.whatsapp.net`
-        await safeSendMessage(sock, jid, { text: config.bootMessage || '😈 Mahito reiniciou. SQLite ativo. Tudo sob controle.' }, {}, 3000)
+        await transport.sendText(jid, config.bootMessage || '😈 Mahito reiniciou. SQLite ativo. Tudo sob controle.')
       }
     }
 
@@ -365,10 +365,10 @@ async function connect() {
             const msgType = Object.keys(msg.message || {})[0] || 'conversation'
             const result = processXp(senderJid, remoteJid, msgType)
             if (result && result.leveledUp) {
-              await safeSendMessage(sock, remoteJid, {
-                text: `⭐ @${jidToNumber(senderJid)} subiu para o *Nível ${result.newLevel}*! 🎉\nXP total: ${result.xp}`,
-                mentions: [senderJid]
-              }, {}, 1500)
+              await transport.sendText(remoteJid,
+                `⭐ @${jidToNumber(senderJid)} subiu para o *Nível ${result.newLevel}*! 🎉\nXP total: ${result.xp}`,
+                { mentions: [senderJid] }
+              )
             }
           }
 
@@ -378,10 +378,10 @@ async function connect() {
             for (const key of newAchievements) {
               const notification = formatAchievementNotification(key)
               if (notification) {
-                await safeSendMessage(sock, remoteJid, {
-                  text: `@${jidToNumber(senderJid)} ${notification}`,
-                  mentions: [senderJid]
-                }, {}, 2000)
+                await transport.sendText(remoteJid,
+                  `@${jidToNumber(senderJid)} ${notification}`,
+                  { mentions: [senderJid] }
+                )
               }
             }
           }
@@ -398,7 +398,7 @@ async function connect() {
           const lowerText = text.toLowerCase()
           for (const reply of replies) {
             if (lowerText.includes(reply.trigger_word)) {
-              await safeSendMessage(sock, remoteJid, { text: reply.response }, {}, 1500)
+              await transport.sendText(remoteJid, reply.response)
               break
             }
           }
@@ -463,7 +463,7 @@ async function connect() {
               const { generateResponse } = require('./ai/persona-engine')
               const history = state.recentGroupMessages[remoteJid] || []
               const aiResp = await generateResponse(remoteJid, senderJid, text, history, persona, require('./db'))
-              await safeSendMessage(sock, remoteJid, { text: aiResp }, {}, 1500)
+              await transport.sendText(remoteJid, aiResp)
             }
           }
         }

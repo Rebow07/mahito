@@ -9,7 +9,8 @@ const {
   getBaseJid, normalize
 } = require('./utils')
 const logger = require('./logger')
-const { safeSendMessage, safeDelete, safeRemove, sendDiscordLog } = require('./queue')
+const { safeDelete, safeRemove, sendDiscordLog } = require('./queue')
+const transport = require('./transport/whatsapp')
 const { isAdmin, getGroupName } = require('./group')
 const { enviarReacaoMahito } = require('./reactions')
 
@@ -96,7 +97,7 @@ function checkSpam(userJid, groupJid) {
 async function processSpamCommand(sock, groupJid, senderJid, text, isOwnerOrAdmin) {
   if (!text.startsWith('!spam')) return false
   if (!isOwnerOrAdmin) {
-    await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins ou donos podem gerenciar o anti-spam.' })
+    await transport.sendText(groupJid, '❌ Apenas admins ou donos podem gerenciar o anti-spam.')
     return true
   }
 
@@ -109,7 +110,7 @@ async function processSpamCommand(sock, groupJid, senderJid, text, isOwnerOrAdmi
   if (sub === 'on' || sub === 'off') {
     const v = sub === 'on' ? 1 : 0
     d.prepare('UPDATE group_spam_config SET enabled = ? WHERE group_jid = ?').run(v, gid)
-    await safeSendMessage(sock, groupJid, { text: `✅ Anti-spam ${v ? 'ATIVADO' : 'DESATIVADO'}.` })
+    await transport.sendText(groupJid, `✅ Anti-spam ${v ? 'ATIVADO' : 'DESATIVADO'}.`)
     return true
   }
 
@@ -117,19 +118,19 @@ async function processSpamCommand(sock, groupJid, senderJid, text, isOwnerOrAdmi
     const field = args[2]
     const val = args[3]
     if (!field || !val) {
-      await safeSendMessage(sock, groupJid, { text: 'Uso: !spam config <campo> <valor>\nCampos: max_msgs, intervalo_seg, acao (warn/kick)' })
+      await transport.sendText(groupJid, 'Uso: !spam config <campo> <valor>\nCampos: max_msgs, intervalo_seg, acao (warn/kick)')
       return true
     }
 
     const allowed = ['max_msgs', 'intervalo_seg', 'acao']
     if (!allowed.includes(field)) {
-       await safeSendMessage(sock, groupJid, { text: `Campo inválido. Permitidos: ${allowed.join(', ')}` })
+       await transport.sendText(groupJid, `Campo inválido. Permitidos: ${allowed.join(', ')}`)
        return true
     }
     
     const finalVal = field === 'acao' ? val : Number(val)
     d.prepare(`UPDATE group_spam_config SET ${field} = ? WHERE group_jid = ?`).run(finalVal, gid)
-    await safeSendMessage(sock, groupJid, { text: `✅ Config ${field} = ${val} atualizada.` })
+    await transport.sendText(groupJid, `✅ Config ${field} = ${val} atualizada.`)
     return true
   }
 
@@ -141,15 +142,14 @@ async function sendStrikeWarning(sock, groupJid, userJid, count, max, reason) {
   const number = jidToNumber(userJid)
   const phrase = strikePhrase(reason)
 
-  await safeSendMessage(sock, groupJid, {
-    text:
-      `⚠️ @${number}\n\n` +
-      `"${phrase}"\n\n` +
-      `📌 Motivo: ${reason}\n` +
-      `📊 Strikes: ${count}/${max}\n` +
-      `❗ Restantes até remoção: ${remaining}`,
-    mentions: [userJid]
-  }, {}, 800, true)
+  await transport.sendText(groupJid,
+    `⚠️ @${number}\n\n` +
+    `"${phrase}"\n\n` +
+    `📌 Motivo: ${reason}\n` +
+    `📊 Strikes: ${count}/${max}\n` +
+    `❗ Restantes até remoção: ${remaining}`,
+    { mentions: [userJid] }
+  )
 
   // Send Mahito reaction for strike
   await enviarReacaoMahito(sock, groupJid, 'strike').catch(() => {})
@@ -247,10 +247,10 @@ async function handleModeration(sock, msg) {
         if (now - lastStrike > 5000) {
            await safeRemove(sock, groupJid, userJid)
            resetStrikesDB(userJid, groupJid)
-           await safeSendMessage(sock, groupJid, {
-             text: `💀 @${userNumber} foi removido instantaneamente por SPAM.`,
-             mentions: [userJid]
-           }, {}, 800, true)
+           await transport.sendText(groupJid,
+             `💀 @${userNumber} foi removido instantaneamente por SPAM.`,
+             { mentions: [userJid] }
+           )
            userStrikeLocks.set(userJid, now)
            await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
            await sendDiscordLog(`🚫 **BAN POR SPAM**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}`, globalConfig)
@@ -270,10 +270,10 @@ async function handleModeration(sock, msg) {
           if (count >= maxPenalties) {
             await safeRemove(sock, groupJid, userJid)
             resetStrikesDB(userJid, groupJid)
-            await safeSendMessage(sock, groupJid, {
-              text: `💀 @${userNumber} caiu...\n\nMotivo: spam/excesso de mensagens\nHumanos que ignoram as regras sempre acabam assim.`,
-              mentions: [userJid]
-            }, {}, 800, true)
+            await transport.sendText(groupJid,
+              `💀 @${userNumber} caiu...\n\nMotivo: spam/excesso de mensagens\nHumanos que ignoram as regras sempre acabam assim.`,
+              { mentions: [userJid] }
+            )
             await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
             await sendDiscordLog(`🚫 **BAN POR SPAM**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}`, globalConfig)
           }
@@ -296,10 +296,10 @@ async function handleModeration(sock, msg) {
           ? strikePhrase('competitor')
           : 'Você realmente achou que isso passaria despercebido?'
 
-      await safeSendMessage(sock, groupJid, {
-        text: `💀 @${userNumber} caiu...\n\nMotivo: ${instantReason.split(':')[1] || 'violação grave'}\n${banPhrase}`,
-        mentions: [userJid]
-      }, {}, 800, true)
+      await transport.sendText(groupJid,
+        `💀 @${userNumber} caiu...\n\nMotivo: ${instantReason.split(':')[1] || 'violação grave'}\n${banPhrase}`,
+        { mentions: [userJid] }
+      )
       await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
       await sendDiscordLog(`🚫 **BAN IMEDIATO**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}\n📌 Motivo: ${instantReason}`, globalConfig)
       return
@@ -327,10 +327,10 @@ async function handleModeration(sock, msg) {
     if (count >= maxPenalties) {
       await safeRemove(sock, groupJid, userJid)
       resetStrikesDB(userJid, groupJid)
-      await safeSendMessage(sock, groupJid, {
-        text: `💀 @${userNumber} foi removido.\n\nMotivo: Acúmulo de strikes (${reason})`,
-        mentions: [userJid]
-      }, {}, 800, true)
+      await transport.sendText(groupJid,
+        `💀 @${userNumber} foi removido.\n\nMotivo: Acúmulo de strikes (${reason})`,
+        { mentions: [userJid] }
+      )
       await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
       await sendDiscordLog(`🚫 **BAN POR ACÚMULO**\n👤 Membro: ${userDisplay}\n👥 Grupo: ${groupName}\n📌 ${reason}\n📊 Strikes: ${count}/${maxPenalties}`, globalConfig)
     }
@@ -353,7 +353,7 @@ async function handleGroupParticipantsUpdate(sock, update) {
       const baseJid = getBaseJid(participant)
       const number = jidToNumber(baseJid)
       const text = String(groupConfig.welcome_text || '😈 Bem-vindo, @user. Tente não quebrar tão rápido.').replace('@user', `@${number}`)
-      await safeSendMessage(sock, update.id, { text, mentions: [baseJid] }, {}, 3000)
+      await transport.sendText(update.id, text, { mentions: [baseJid] })
     }
   }
 
@@ -361,7 +361,7 @@ async function handleGroupParticipantsUpdate(sock, update) {
     const baseJid = getBaseJid(update.participants?.[0] || '')
     const number = jidToNumber(baseJid)
     const text = (groupConfig.leave_text || '☹️ @user não aguentou e abandonou o Mahito.').replace('@user', `@${number}`)
-    await safeSendMessage(sock, update.id, { text, mentions: [baseJid] }, {}, 3000)
+    await transport.sendText(update.id, text, { mentions: [baseJid] })
     await enviarReacaoMahito(sock, update.id, 'ban').catch(() => {})
   }
 }

@@ -19,13 +19,26 @@ const {
 } = require('./db')
 const { normalize, onlyDigits, jidToNumber, getBaseJid, extractUrls, sleep, getText } = require('./utils')
 const logger = require('./logger')
-const { safeSendMessage, safeDelete, safeRemove, sendDiscordLog, enqueueWA } = require('./queue')
+const { safeDelete, safeRemove, sendDiscordLog, enqueueWA } = require('./queue')
+const transport = require('./transport/whatsapp')
 const { getGroupName, getGroupMeta, isAdmin } = require('./group')
 const { sendStrikeWarning } = require('./moderation')
 const { enviarReacaoMahito } = require('./reactions')
 const { formatAchievementList, TOTAL_ACHIEVEMENTS } = require('./achievements')
 const { createBackup, commitAndPushBackup, listBackups } = require('./backup')
 const { generateWeeklyReport } = require('./reports')
+
+// ─── Shim de compatibilidade (Bloco 4) ───────────────────────────────────────
+// Roteia as ~80 chamadas safeSendMessage existentes via camada de transporte.
+// O sock e os parâmetros de delay/priority são ignorados — o transporte usa
+// o sock registrado via transport.init(sock) em index.js.
+// TODO Bloco 5: remover shim e reescrever chamadas diretamente.
+function safeSendMessage(_sock, jid, content, _opts, _delay, _priority) {
+  const text = content?.text || ''
+  const { mentions } = content || {}
+  return transport.sendText(jid, text, mentions ? { mentions } : {})
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ─── Sticker Helpers ───
 

@@ -199,17 +199,17 @@ EVOLUTION_INSTANCE=mahito2
 # Após editar localmente:
 git add . && git commit -m "tipo: descrição" && git push
 
-# No servidor:
-cd ~/mahito && git pull && pm2 restart mahito-bot
+# Deploy no servidor (via SSH — PM2 está no servidor remoto, não na máquina local):
+ssh rebow@192.168.1.236 "source ~/.nvm/nvm.sh && cd ~/mahito && git pull && pm2 restart mahito-bot"
 
 # Se conflito:
-git stash && git pull && pm2 restart mahito-bot
+ssh rebow@192.168.1.236 "source ~/.nvm/nvm.sh && cd ~/mahito && git stash && git pull && pm2 restart mahito-bot"
 
 # Reset forçado:
-git fetch origin && git reset --hard origin/main && pm2 restart mahito-bot
+ssh rebow@192.168.1.236 "source ~/.nvm/nvm.sh && cd ~/mahito && git fetch origin && git reset --hard origin/main && pm2 restart mahito-bot"
 
-# Verificar:
-pm2 logs mahito-bot --lines 20 --nostream
+# Verificar logs:
+ssh rebow@192.168.1.236 "source ~/.nvm/nvm.sh && pm2 logs mahito-bot --lines 20 --nostream"
 ```
 
 ---
