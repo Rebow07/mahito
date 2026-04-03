@@ -5,6 +5,7 @@ const { getDB, getAllowedGroups, getGroupConfig, getGroupRanking, getTotalUsers,
 const { state } = require('./state')
 const { getBaseJid, jidToNumber } = require('./utils')
 const logger = require('./logger')
+const { handleWebhookRequest } = require('./webhook')
 
 function getLocalIP() {
   const interfaces = os.networkInterfaces()
@@ -174,6 +175,10 @@ function startDashboard(sock) {
       sendJSON(res, { success: true, message: 'Reiniciando...' })
       setTimeout(() => process.exit(0), 2000)
       return
+    }
+
+    if (req.method === 'POST' && parsed.pathname === '/webhook/evolution') {
+      return handleWebhookRequest(req, res)
     }
 
     if (parsed.pathname === '/' || parsed.pathname === '/index.html') {
