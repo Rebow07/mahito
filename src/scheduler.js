@@ -1,6 +1,6 @@
 const { getDB } = require('./db')
 const { getBaseJid } = require('./utils')
-const { safeSendMessage } = require('./queue')
+const transport = require('./transport/whatsapp')
 const logger = require('./logger')
 
 function initReminderScheduler(sock) {
@@ -24,9 +24,9 @@ async function checkReminders(sock) {
     try {
       const msg = `🔔 *LEMBRETE*\n\n👉 ${r.titulo}`
       if (r.group_jid) {
-        await safeSendMessage(sock, r.group_jid, { text: `🔔 Lembrete para @${r.user_jid.split('@')[0]}:\n\n${r.titulo}`, mentions: [r.user_jid] })
+        await transport.sendText(r.group_jid, `🔔 Lembrete para @${r.user_jid.split('@')[0]}:\n\n${r.titulo}`, { mentions: [r.user_jid] })
       } else {
-        await safeSendMessage(sock, r.user_jid, { text: msg })
+        await transport.sendText(r.user_jid, msg)
       }
 
       // Update last sent
@@ -57,7 +57,7 @@ async function processReminderCommand(text, sock, senderJid, groupJid) {
   const parts = args.split('|').map(x => x.trim())
 
   if (parts.length < 2) {
-    await safeSendMessage(sock, groupJid || senderJid, { text: 'Uso: !lembrete DD/MM HH:MM | Mensagem | [daily|weekly|none]' })
+    await transport.sendText(groupJid || senderJid, 'Uso: !lembrete DD/MM HH:MM | Mensagem | [daily|weekly|none]')
     return true
   }
 
@@ -68,7 +68,7 @@ async function processReminderCommand(text, sock, senderJid, groupJid) {
   // Parse DD/MM HH:MM
   const match = dtStr.match(/^(\d{2})\/(\d{2}) (\d{2}):(\d{2})$/)
   if (!match) {
-    await safeSendMessage(sock, groupJid || senderJid, { text: 'Formato de data inválido. Use DD/MM HH:MM (ex: 15/04 09:30)' })
+    await transport.sendText(groupJid || senderJid, 'Formato de data inválido. Use DD/MM HH:MM (ex: 15/04 09:30)')
     return true
   }
 
@@ -85,7 +85,7 @@ async function processReminderCommand(text, sock, senderJid, groupJid) {
    .run(senderJid, groupJid || null, titulo, target.toISOString(), recorrencia)
 
   const groupText = groupJid ? ' neste grupo' : ''
-  await safeSendMessage(sock, groupJid || senderJid, { text: `✅ Lembrete agendado para ${target.toLocaleString('pt-BR')} ${groupText}.` })
+  await transport.sendText(groupJid || senderJid, `✅ Lembrete agendado para ${target.toLocaleString('pt-BR')} ${groupText}.`)
   return true
 }
 

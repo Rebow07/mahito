@@ -1,5 +1,5 @@
 const { getBroadcastList, addBroadcastContact, removeBroadcastContact, addBroadcastMessage, updateBroadcastMessage, getBotConfig } = require('./db')
-const { safeSendMessage } = require('./queue')
+const transport = require('./transport/whatsapp')
 const { onlyDigits, jidToNumber, sleep } = require('./utils')
 const logger = require('./logger')
 
@@ -14,7 +14,7 @@ async function processBroadcastCommand(text, sock, senderJid) {
     // !lista add <numero> | <nome>
     const match = text.match(/!lista add\s+([0-9]+)\s*\|\s*(.+)/i)
     if (!match) {
-      await safeSendMessage(sock, senderJid, { text: 'Uso: !lista add 551199999999 | Nome do Contato' })
+      await transport.sendText(senderJid, 'Uso: !lista add 551199999999 | Nome do Contato')
       return true
     }
     const num = onlyDigits(match[1])
@@ -23,9 +23,9 @@ async function processBroadcastCommand(text, sock, senderJid) {
 
     const ok = addBroadcastContact(senderJid, contactJid, name)
     if (ok) {
-      await safeSendMessage(sock, senderJid, { text: `✅ ${name} (${num}) adicionado à lista de transmissão.` })
+      await transport.sendText(senderJid, `✅ ${name} (${num}) adicionado à lista de transmissão.`)
     } else {
-      await safeSendMessage(sock, senderJid, { text: `❌ Erro ao adicionar. Contato já existe?` })
+      await transport.sendText(senderJid, `❌ Erro ao adicionar. Contato já existe?`)
     }
     return true
   }
@@ -33,45 +33,45 @@ async function processBroadcastCommand(text, sock, senderJid) {
   if (sub === 'remove') {
     const num = onlyDigits(parts.slice(1).join(' '))
     if (!num) {
-      await safeSendMessage(sock, senderJid, { text: 'Uso: !lista remove 551199999999' })
+      await transport.sendText(senderJid, 'Uso: !lista remove 551199999999')
       return true
     }
     removeBroadcastContact(senderJid, num)
-    await safeSendMessage(sock, senderJid, { text: `✅ Contato ${num} removido da lista.` })
+    await transport.sendText(senderJid, `✅ Contato ${num} removido da lista.`)
     return true
   }
 
   if (sub === 'ver') {
     const list = getBroadcastList(senderJid)
     if (!list.length) {
-      await safeSendMessage(sock, senderJid, { text: '📭 Lista de transmissão vazia.' })
+      await transport.sendText(senderJid, '📭 Lista de transmissão vazia.')
       return true
     }
     const lines = list.map((c, i) => `${i + 1}. ${c.name} (${jidToNumber(c.contact_jid)})`)
-    await safeSendMessage(sock, senderJid, { text: `📡 *Lista de Transmissão* (${list.length} contatos)\n\n${lines.join('\n')}` })
+    await transport.sendText(senderJid, `📡 *Lista de Transmissão* (${list.length} contatos)\n\n${lines.join('\n')}`)
     return true
   }
 
   if (sub === 'enviar') {
     const message = raw.replace(/^enviar\s*/i, '').trim()
     if (!message) {
-      await safeSendMessage(sock, senderJid, { text: 'Uso: !lista enviar Sua mensagem aqui' })
+      await transport.sendText(senderJid, 'Uso: !lista enviar Sua mensagem aqui')
       return true
     }
 
     const list = getBroadcastList(senderJid)
     if (!list.length) {
-      await safeSendMessage(sock, senderJid, { text: '📭 Lista de transmissão vazia. Adicione contatos primeiro.' })
+      await transport.sendText(senderJid, '📭 Lista de transmissão vazia. Adicione contatos primeiro.')
       return true
     }
 
     const senderNumber = getBotConfig('broadcast_sender') || jidToNumber(senderJid)
     const msgId = addBroadcastMessage(senderJid, message, senderNumber)
 
-    await safeSendMessage(sock, senderJid, { text: `📡 Iniciando envio para ${list.length} contatos...\n⏳ Delay humano de 3-5 min entre cada envio.` })
+    await transport.sendText(senderJid, `📡 Iniciando envio para ${list.length} contatos...\n⏳ Delay humano de 3-5 min entre cada envio.`)
 
     // Enviar em background sem bloquear
-    sendBroadcast(sock, senderJid, list, message, msgId).catch(err => {
+    sendBroadcast(senderJid, list, message, msgId).catch(err => {
       logger.error('broadcast', `Erro no envio em massa: ${err.message}`)
     })
 
@@ -79,20 +79,18 @@ async function processBroadcastCommand(text, sock, senderJid) {
   }
 
   // Subcomando desconhecido
-  await safeSendMessage(sock, senderJid, {
-    text: `📡 *Lista de Transmissão*\n\n• !lista add <num> | <nome>\n• !lista remove <num>\n• !lista ver\n• !lista enviar <mensagem>`
-  })
+  await transport.sendText(senderJid, `📡 *Lista de Transmissão*\n\n• !lista add <num> | <nome>\n• !lista remove <num>\n• !lista ver\n• !lista enviar <mensagem>`)
   return true
 }
 
-async function sendBroadcast(sock, ownerJid, contacts, message, msgId) {
+async function sendBroadcast(ownerJid, contacts, message, msgId) {
   let sent = 0
   let failed = 0
 
   for (let i = 0; i < contacts.length; i++) {
     const contact = contacts[i]
     try {
-      await safeSendMessage(sock, contact.contact_jid, { text: message }, {}, 2000)
+      await transport.sendText(contact.contact_jid, message)
       sent++
       logger.info('broadcast', `Enviado para ${contact.name} (${jidToNumber(contact.contact_jid)}) [${sent}/${contacts.length}]`)
     } catch (err) {
@@ -109,15 +107,10 @@ async function sendBroadcast(sock, ownerJid, contacts, message, msgId) {
   }
 
   // Atualizar status
-  if (msgId) {
-    const { updateBroadcastMessage } = require('./db')
-    updateBroadcastMessage(msgId, failed === 0 ? 'sent' : 'partial')
-  }
+  if (msgId) updateBroadcastMessage(msgId, failed === 0 ? 'sent' : 'partial')
 
   // Notificar o dono
-  await safeSendMessage(sock, ownerJid, {
-    text: `📡 *Transmissão concluída!*\n\n✅ Enviados: ${sent}\n❌ Falhas: ${failed}\n📊 Total: ${contacts.length}`
-  })
+  await transport.sendText(ownerJid, `📡 *Transmissão concluída!*\n\n✅ Enviados: ${sent}\n❌ Falhas: ${failed}\n📊 Total: ${contacts.length}`)
 }
 
 module.exports = {

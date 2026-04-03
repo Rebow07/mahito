@@ -18,6 +18,7 @@ const logger = require('./logger')
 const lidToJid = new Map()
 
 const { safeSendMessage } = require('./queue')
+const transport = require('./transport/whatsapp')
 const { handleModeration, handleGroupParticipantsUpdate } = require('./moderation')
 const {
   processOwnerPrivate,
@@ -158,6 +159,7 @@ async function connect() {
       await sleep(5000)
       state.botReady = true
       logger.info('index', `🟢 Bot pronto! Bot: ${config.phoneNumber} | Dono: ${config.ownerNumbers.join(', ')} | 🗄️ SQLite`)
+      transport.init(sock)
       scheduleAllMessages(sock)
       
       try { const { initPersonalScheduler } = require('./personal'); initPersonalScheduler() } catch(e) { logger.error('index', `Personal init: ${e.message}`) }

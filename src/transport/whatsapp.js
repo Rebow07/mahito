@@ -43,12 +43,20 @@ function requireSock(fnName) {
 
 // ─── sendText ─────────────────────────────────────────────────────────────────
 
-async function sendText(jid, text, options = {}) {
+/**
+ * @param {string}   jid
+ * @param {string}   text
+ * @param {object}   [opts]
+ * @param {string[]} [opts.mentions]  JIDs a mencionar (Baileys: content.mentions)
+ */
+async function sendText(jid, text, { mentions = [] } = {}) {
   if (isEvolutionEnabled()) {
     return evolution.sendText(jid, text)
   }
   if (!requireSock('sendText')) return null
-  return safeSendMessage(_sock, jid, { text }, options)
+  const content = { text }
+  if (mentions.length) content.mentions = mentions
+  return safeSendMessage(_sock, jid, content)
 }
 
 // ─── sendMedia ────────────────────────────────────────────────────────────────

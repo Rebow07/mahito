@@ -1,5 +1,5 @@
 const { getDB, getWeeklyStats, getGroupRanking } = require('./db')
-const { safeSendMessage } = require('./queue')
+const transport = require('./transport/whatsapp')
 const { loadConfig } = require('./config')
 const logger = require('./logger')
 
@@ -30,7 +30,7 @@ async function sendDailyReport(sock) {
 
   for (const ownerNum of config.ownerNumbers) {
     const ownerJid = `${ownerNum}@s.whatsapp.net`
-    await safeSendMessage(sock, ownerJid, { text: reportMsg })
+    await transport.sendText(ownerJid, reportMsg)
   }
 }
 
