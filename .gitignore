@@ -12,3 +12,4 @@ data/nsfw_hashes/*
 !data/nsfw_hashes/.gitkeep
 backups/*.db
 backups/
+pixel-agents/
