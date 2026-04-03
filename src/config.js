@@ -67,6 +67,12 @@ function loadConfig() {
 
   if (process.env.BOOT_MESSAGE)
     config.bootMessage = process.env.BOOT_MESSAGE
+
+  // ── Evolution API ────────────────────────────────────────────────────────
+  config.evolutionApiUrl      = process.env.EVOLUTION_API_URL      || ''
+  config.evolutionApiKey      = process.env.EVOLUTION_API_KEY      || ''
+  config.evolutionInstance    = process.env.EVOLUTION_INSTANCE     || ''
+  config.enableEvolution      = process.env.ENABLE_EVOLUTION === 'true'
   // ────────────────────────────────────────────────────────────────────────
 
   config.ownerNumbers = (config.ownerNumbers || []).map(onlyDigits).filter(Boolean)

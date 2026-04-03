@@ -71,7 +71,6 @@ async function runPersonalSession() {
     const sock = makeWASocket({
       auth: authState,
       logger: P({ level: 'silent' }),
-      printQRInTerminal: true, // Only if it hasn't been scanned
       syncFullHistory: false
     })
 

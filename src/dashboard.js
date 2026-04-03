@@ -16,7 +16,7 @@ function getLocalIP() {
   return 'localhost'
 }
 
-const PORT = 3000
+const PORT = parseInt(process.env.PORT || '3000', 10)
 let serverInstance = null
 let sockRef = null
 

@@ -99,8 +99,7 @@ async function connect() {
     browser: Browsers.ubuntu('Chrome'),
     defaultQueryTimeoutMs: undefined,
     generateHighQualityLinkPreview: true,
-    syncFullHistory: false,
-    printQRInTerminal: false
+    syncFullHistory: false
   })
 
   // Silence internal Baileys session logs
