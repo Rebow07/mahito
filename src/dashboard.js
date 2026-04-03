@@ -178,7 +178,7 @@ function startDashboard(sock) {
     }
 
     if (req.method === 'POST' && parsed.pathname === '/webhook/evolution') {
-      return handleWebhookRequest(req, res)
+      return handleWebhookRequest(req, res, sockRef)
     }
 
     if (parsed.pathname === '/' || parsed.pathname === '/index.html') {

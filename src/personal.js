@@ -6,7 +6,7 @@ const path = require('path')
 const { getKey } = require('./ai/key-manager')
 const { GoogleGenerativeAI } = require('@google/generative-ai')
 const logger = require('./logger')
-const { safeSendMessage } = require('./queue')
+const transport = require('./transport/whatsapp')
 const { sleep, jidToNumber } = require('./utils')
 
 // ─── Helpers ───
@@ -62,7 +62,32 @@ function initPersonalScheduler() {
   }, msToNext)
 }
 
-async function runPersonalSession() {
+// ─── Envio via Evolution API (sem sessão Baileys separada) ───
+
+async function runPersonalSessionEvolution() {
+  logger.info('personal', 'Iniciando envio pessoal via Evolution API...')
+  const d = getDB()
+  const contacts = d.prepare('SELECT * FROM personal_contacts WHERE active = 1').all()
+  const profileRow = d.prepare('SELECT profile FROM personal_profile WHERE id = 1').get()
+  const profileText = profileRow ? profileRow.profile : 'O criador deste fluxo.'
+
+  for (const c of contacts) {
+    const message = await generatePersonalMessage(profileText, c)
+    await transport.sendText(c.jid, message)
+    d.prepare('INSERT INTO personal_sent_log (jid, message, sent_at) VALUES (?, ?, ?)').run(c.jid, message, Date.now())
+    logger.info('personal', `Mensagem enviada para ${c.name} (${c.jid}) via Evolution`)
+
+    // Delay randômico 2-8 min (120k ms a 480k ms)
+    const delayMs = Math.floor(Math.random() * (480000 - 120000 + 1) + 120000)
+    await sleep(delayMs)
+  }
+
+  logger.info('personal', 'Todos os contatos concluídos via Evolution.')
+}
+
+// ─── Envio via Baileys (sessão pessoal separada — comportamento original) ───
+
+async function runPersonalSessionBaileys() {
   logger.info('personal', 'Iniciando sessão secundária pessoal para envio diário...')
   const personalSessionPath = path.join(PATHS.SESSION_DIR, 'personal')
   const { state: authState, saveCreds } = await useMultiFileAuthState(personalSessionPath)
@@ -81,7 +106,6 @@ async function runPersonalSession() {
       
       if (qr) {
         logger.info('personal', '[ATENÇÃO] QR code da SESSÃO PESSOAL impresso. É necessário conectar para o módulo funcionar.')
-        console.log('\n📲 ESCANEIE O QR CODE ACIMA COM SEU WHATSAPP PESSOAL (MÓDULO B5) 📲\n')
       }
 
       if (connection === 'open') {
@@ -121,9 +145,19 @@ async function runPersonalSession() {
   })
 }
 
-// ─── Command Management ───
+// ─── Dispatcher: escolhe via ENABLE_EVOLUTION ou Baileys ───
 
-async function handlePersonalCommand(text, sock, senderJid) {
+async function runPersonalSession() {
+  if (process.env.ENABLE_EVOLUTION === 'true') {
+    return runPersonalSessionEvolution()
+  }
+  return runPersonalSessionBaileys()
+}
+
+// ─── Command Management ───
+// Migrado: não depende mais de sock — usa transport.sendText
+
+async function handlePersonalCommand(text, senderJid) {
   if (!text.startsWith('!pessoal')) return false
 
   const args = text.split(' ')
@@ -133,11 +167,11 @@ async function handlePersonalCommand(text, sock, senderJid) {
   if (sub === 'perfil') {
     const pInfo = text.replace('!pessoal perfil', '').trim()
     if (!pInfo) {
-      await safeSendMessage(sock, senderJid, { text: 'Uso: !pessoal perfil Sou o Kelvin, pai de família...' })
+      await transport.sendText(senderJid, 'Uso: !pessoal perfil Sou o Kelvin, pai de família...')
       return true
     }
     d.prepare('INSERT OR REPLACE INTO personal_profile (id, profile, updated_at) VALUES (1, ?, ?)').run(pInfo, Date.now())
-    await safeSendMessage(sock, senderJid, { text: '✅ Perfil pessoal atualizado.' })
+    await transport.sendText(senderJid, '✅ Perfil pessoal atualizado.')
     return true
   }
 
@@ -145,7 +179,7 @@ async function handlePersonalCommand(text, sock, senderJid) {
     // !pessoal add <num> | <rel> | <nome> | <notas>
     const match = text.match(/!pessoal add\s+([0-9]+)\s*\|\s*([^|]+)\s*\|\s*([^|]+)(?:\s*\|\s*(.*))?/)
     if (!match) {
-      await safeSendMessage(sock, senderJid, { text: 'Uso: !pessoal add 551199999999 | Amigo | João | Adora carros' })
+      await transport.sendText(senderJid, 'Uso: !pessoal add 551199999999 | Amigo | João | Adora carros')
       return true
     }
     const num = match[1]
@@ -155,7 +189,7 @@ async function handlePersonalCommand(text, sock, senderJid) {
     const jid = `${num}@s.whatsapp.net`
 
     d.prepare('INSERT OR REPLACE INTO personal_contacts (jid, relationship, name, notes, active) VALUES (?, ?, ?, ?, 1)').run(jid, rel, nome, nota)
-    await safeSendMessage(sock, senderJid, { text: `✅ ${nome} adicionado(a) aos disparos diários.` })
+    await transport.sendText(senderJid, `✅ ${nome} adicionado(a) aos disparos diários.`)
     return true
   }
 
@@ -163,18 +197,18 @@ async function handlePersonalCommand(text, sock, senderJid) {
     const num = args[2]
     if (!num) return true
     d.prepare('UPDATE personal_contacts SET active = 0 WHERE jid LIKE ?').run(`%${num}%`)
-    await safeSendMessage(sock, senderJid, { text: '✅ Contato inativado.' })
+    await transport.sendText(senderJid, '✅ Contato inativado.')
     return true
   }
 
   if (sub === 'list') {
     const list = d.prepare('SELECT * FROM personal_contacts WHERE active = 1').all()
     if (!list.length) {
-      await safeSendMessage(sock, senderJid, { text: 'Nenhum contato ativo.' })
+      await transport.sendText(senderJid, 'Nenhum contato ativo.')
       return true
     }
     const txt = list.map(c => `• ${c.name} (${jidToNumber(c.jid)})\n  Relação: ${c.relationship}`).join('\n\n')
-    await safeSendMessage(sock, senderJid, { text: `📋 Pessoas Ativas no Bom Dia:\n\n${txt}` })
+    await transport.sendText(senderJid, `📋 Pessoas Ativas no Bom Dia:\n\n${txt}`)
     return true
   }
 
@@ -184,7 +218,7 @@ async function handlePersonalCommand(text, sock, senderJid) {
     // !pessoal agendar DD/MM HH:MM | <numero> | <mensagem>
     const match = text.match(/!pessoal agendar\s+(\d{2}\/\d{2})\s+(\d{2}:\d{2})\s*\|\s*([0-9]+)\s*\|\s*(.+)/i)
     if (!match) {
-      await safeSendMessage(sock, senderJid, { text: 'Uso: !pessoal agendar DD/MM HH:MM | número | mensagem\nEx: !pessoal agendar 15/04 09:30 | 5517999999999 | Bom dia!' })
+      await transport.sendText(senderJid, 'Uso: !pessoal agendar DD/MM HH:MM | número | mensagem\nEx: !pessoal agendar 15/04 09:30 | 5517999999999 | Bom dia!')
       return true
     }
     const dateStr = match[1]
@@ -196,7 +230,7 @@ async function handlePersonalCommand(text, sock, senderJid) {
     const dateMatch = dateStr.match(/^(\d{2})\/(\d{2})$/)
     const timeMatch = timeStr.match(/^(\d{2}):(\d{2})$/)
     if (!dateMatch || !timeMatch) {
-      await safeSendMessage(sock, senderJid, { text: '❌ Formato de data inválido. Use DD/MM HH:MM' })
+      await transport.sendText(senderJid, '❌ Formato de data inválido. Use DD/MM HH:MM')
       return true
     }
 
@@ -207,9 +241,9 @@ async function handlePersonalCommand(text, sock, senderJid) {
     d.prepare('INSERT INTO reminders (user_jid, group_jid, titulo, datetime_alvo, recorrencia, active) VALUES (?, ?, ?, ?, ?, 1)')
       .run(targetJid, null, mensagem, target.toISOString(), 'none')
 
-    await safeSendMessage(sock, senderJid, {
-      text: `✅ Mensagem agendada!\n\n📱 Para: ${targetNum}\n📅 Data: ${target.toLocaleString('pt-BR')}\n💬 Msg: ${mensagem}`
-    })
+    await transport.sendText(senderJid,
+      `✅ Mensagem agendada!\n\n📱 Para: ${targetNum}\n📅 Data: ${target.toLocaleString('pt-BR')}\n💬 Msg: ${mensagem}`
+    )
     return true
   }
 
@@ -217,7 +251,7 @@ async function handlePersonalCommand(text, sock, senderJid) {
     const { getOwnerReminders } = require('./db')
     const reminders = getOwnerReminders(senderJid)
     if (!reminders.length) {
-      await safeSendMessage(sock, senderJid, { text: '📭 Nenhum agendamento pendente.' })
+      await transport.sendText(senderJid, '📭 Nenhum agendamento pendente.')
       return true
     }
     const lines = reminders.map(r => {
@@ -225,18 +259,18 @@ async function handlePersonalCommand(text, sock, senderJid) {
       const dest = r.group_jid ? r.group_jid : jidToNumber(r.user_jid)
       return `🔔 ID ${r.id} — ${dt}\n   📱 ${dest}\n   💬 ${r.titulo}`
     })
-    await safeSendMessage(sock, senderJid, { text: `📋 *Agendamentos Pendentes*\n\n${lines.join('\n\n')}\n\nPara cancelar: !pessoal cancelar <id>` })
+    await transport.sendText(senderJid, `📋 *Agendamentos Pendentes*\n\n${lines.join('\n\n')}\n\nPara cancelar: !pessoal cancelar <id>`)
     return true
   }
 
   if (sub === 'cancelar') {
     const id = parseInt(args[2])
     if (!id || isNaN(id)) {
-      await safeSendMessage(sock, senderJid, { text: 'Uso: !pessoal cancelar <id>\nVeja IDs com: !pessoal agenda' })
+      await transport.sendText(senderJid, 'Uso: !pessoal cancelar <id>\nVeja IDs com: !pessoal agenda')
       return true
     }
     d.prepare('UPDATE reminders SET active = 0 WHERE id = ?').run(id)
-    await safeSendMessage(sock, senderJid, { text: `✅ Agendamento #${id} cancelado.` })
+    await transport.sendText(senderJid, `✅ Agendamento #${id} cancelado.`)
     return true
   }
 

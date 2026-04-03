@@ -28,21 +28,32 @@ const { formatAchievementList, TOTAL_ACHIEVEMENTS } = require('./achievements')
 const { createBackup, commitAndPushBackup, listBackups } = require('./backup')
 const { generateWeeklyReport } = require('./reports')
 
-// ─── Shim de compatibilidade (Bloco 4) ───────────────────────────────────────
-// Roteia as ~80 chamadas safeSendMessage existentes via camada de transporte.
+// ─── Shim de compatibilidade (Bloco 4 → hardened Bloco 7) ────────────────────
+// Roteia as ~80 chamadas safeSendMessage via camada de transporte.
 // O sock e os parâmetros de delay/priority são ignorados — o transporte usa
 // o sock registrado via transport.init(sock) em index.js.
-// TODO Bloco 5: remover shim e reescrever chamadas diretamente.
+// Conteúdo não-texto (sticker, image, react) é ignorado no shim —
+// essas operações dependem de Baileys direto e são guardadas separadamente.
 function safeSendMessage(_sock, jid, content, _opts, _delay, _priority) {
-  const text = content?.text || ''
-  const { mentions } = content || {}
-  return transport.sendText(jid, text, mentions ? { mentions } : {})
+  if (!content) return Promise.resolve(null)
+  // Contéudo texto: delegar ao transport
+  if (content.text) {
+    const { mentions } = content
+    return transport.sendText(jid, content.text, mentions ? { mentions } : {})
+  }
+  // Conteúdo binário (sticker, image, react) — não suportado via shim
+  logger.info('commands', `safeSendMessage shim: conteúdo não-texto ignorado para ${jid} (tipo: ${Object.keys(content).join(',')})`)
+  return Promise.resolve(null)
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─── Sticker Helpers ───
 
 async function sendMahitoSticker(sock, jid) {
+  if (!sock) {
+    logger.info('commands', 'sendMahitoSticker ignorado: sock indisponível (modo Evolution)')
+    return false
+  }
   const stickerPath = path.join(PATHS.STICKERS_DIR, 'mahito.webp')
   if (!fs.existsSync(stickerPath)) return false
   try {
@@ -55,6 +66,10 @@ async function sendMahitoSticker(sock, jid) {
 }
 
 async function sendStickerFromMessage(sock, targetJid, sourceMsg, quotedMsg) {
+  if (!sock) {
+    logger.warn('commands', 'sendStickerFromMessage ignorado: sock indisponível (modo Evolution) — downloadMediaMessage requer Baileys')
+    throw new Error('Stickers não disponíveis em modo Evolution')
+  }
   try {
     // Debug log
     const msgKeys = Object.keys(sourceMsg?.message || {})
@@ -257,6 +272,11 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
                   msgObj?.message?.viewOnceMessage?.message?.imageMessage
 
   if (state.customerStates[jid]?.setProfilePhoto && isImage) {
+    if (!sock) {
+      await safeSendMessage(sock, jid, { text: '⚠️ Alteração de foto não disponível em modo Evolution.' })
+      delete state.customerStates[jid].setProfilePhoto
+      return
+    }
     try {
       const buffer = await downloadMediaMessage(msgObj, 'buffer', {}, { logger: P({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage })
       await enqueueWA('updateProfilePicture', () => sock.updateProfilePicture(sock.user.id, buffer), DELAYS.profile)
@@ -270,6 +290,10 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
   }
 
   if (msg === 'apagar conversas' || msg === '#apagar conversas') {
+    if (!sock) {
+      await safeSendMessage(sock, jid, { text: '⚠️ Apagar conversas não disponível em modo Evolution (requer sock Baileys).' })
+      return
+    }
     const { getAllChatKeys } = require('./db')
     const keys = getAllChatKeys()
     let count = 0
@@ -297,6 +321,10 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
   }
 
   if (msg === 'limpar conversas' || msg === '#limparconversas' || msg === 'limparconversas') {
+    if (!sock) {
+      await safeSendMessage(sock, jid, { text: '⚠️ Limpar conversas não disponível em modo Evolution (requer sock Baileys).' })
+      return
+    }
     const { getAllChatKeys } = require('./db')
     const keys = getAllChatKeys()
     let count = 0
@@ -423,6 +451,10 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       return
     }
     if (msg === '3') {
+      if (!sock) {
+        await safeSendMessage(sock, jid, { text: '⚠️ Listar grupos não disponível em modo Evolution (requer sock Baileys).' })
+        return
+      }
       const chats = await sock.groupFetchAllParticipating()
       const botJid = getBaseJid(sock.user.id)
       const lines = []
@@ -441,7 +473,7 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
         await safeSendMessage(sock, jid, { text: '❌ Nenhum grupo na lista de autorizados ainda.' })
         return
       }
-      const chats = await sock.groupFetchAllParticipating()
+      const chats = sock ? await sock.groupFetchAllParticipating() : {}
       const lines = allowed.map((gJid, i) => `${i + 1}. ${chats[gJid]?.subject || 'Grupo'} (${gJid})`)
       state.customerStates[jid].flow = 'menu_group_select'
       state.customerStates[jid].groupsList = allowed
@@ -504,6 +536,10 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       return
     }
     if (msg === '8') {
+       if (!sock) {
+         await safeSendMessage(sock, jid, { text: '⚠️ Sair do grupo não disponível em modo Evolution.' })
+         return
+       }
        await safeSendMessage(sock, jid, { text: '👋 Saindo do grupo...' })
        await safeRemove(sock, targetJid, getBaseJid(sock.user.id))
        state.customerStates[jid].flow = 'owner_menu'
@@ -537,6 +573,10 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       return
     }
     if (msg === '15') {
+       if (!sock) {
+         await safeSendMessage(sock, jid, { text: '⚠️ Fechar/abrir grupo não disponível em modo Evolution.' })
+         return
+       }
        try {
          const meta = await getGroupMeta(sock, targetJid)
          const isAnnounce = meta?.announce
@@ -955,6 +995,11 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
   if (sc.flow === 'awaiting_sticker_upload') {
     const stickerMsg = msgObj?.message?.stickerMessage || msgObj?.message?.imageMessage || msgObj?.message?.videoMessage
     if (stickerMsg) {
+      if (!sock) {
+        await safeSendMessage(sock, jid, { text: '⚠️ Upload de stickers não disponível em modo Evolution.' })
+        state.customerStates[jid].flow = 'menu_mahito'
+        return
+      }
       try {
         const buffer = await downloadMediaMessage(msgObj, 'buffer', {}, { logger: P({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage })
         // Save to temp, will name properly after category
@@ -1206,7 +1251,7 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     state.customerStates[jid].comunicadoText = msgObj?.message?.conversation || msgObj?.message?.extendedTextMessage?.text || raw
     state.customerStates[jid].flow = 'comunicado_group'
     
-    const chats = await sock.groupFetchAllParticipating()
+    const chats = sock ? await sock.groupFetchAllParticipating() : {}
     const options = []
     state.customerStates[jid].comunicadoGroups = []
     let i = 1
@@ -1359,6 +1404,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     // ─── !fadm / !fechar ───
     if (cmd === '!fadm' || cmd === '!fechar') {
       if (!admin && !isBotOwner) return true
+      if (!sock) { await safeSendMessage(sock, groupJid, { text: '⚠️ Fechar grupo não disponível em modo Evolution.' }); return true }
       try {
         await sock.groupSettingUpdate(groupJid, 'announcement')
         await safeSendMessage(sock, groupJid, { text: '🔒 Grupo fechado. Apenas administradores podem enviar mensagens.' })
@@ -1371,6 +1417,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     // ─── !abrir ───
     if (cmd === '!abrir') {
       if (!admin && !isBotOwner) return true
+      if (!sock) { await safeSendMessage(sock, groupJid, { text: '⚠️ Abrir grupo não disponível em modo Evolution.' }); return true }
       try {
         await sock.groupSettingUpdate(groupJid, 'not_announcement')
         await safeSendMessage(sock, groupJid, { text: '🔓 Grupo aberto para todos os membros.' })
@@ -1571,7 +1618,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     }
 
     // Filtra o próprio bot (ele não precisa aparecer na hierarquia repetido)
-    const botJid = getBaseJid(sock.user.id)
+    const botJid = sock?.user?.id ? getBaseJid(sock.user.id) : `${config.phoneNumber}@s.whatsapp.net`
     const filteredVips = vips.filter(u => getBaseJid(u.user_id) !== botJid)
 
     filteredVips.sort((a, b) => b.perm_level - a.perm_level)
@@ -1609,7 +1656,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
   if (cmd === '!ranking' || cmd === '!top') {
     let top = getGroupRanking(groupJid, 15)
     // Filtra o próprio bot do ranking e pega os 10 primeiros reais
-    const botJid = getBaseJid(sock.user.id)
+    const botJid = sock?.user?.id ? getBaseJid(sock.user.id) : `${config.phoneNumber}@s.whatsapp.net`
     top = top.filter(u => getBaseJid(u.user_id) !== botJid).slice(0, 10)
 
     if (!top.length) { await safeSendMessage(sock, groupJid, { text: 'Nenhum ranking ainda.' }); return true }

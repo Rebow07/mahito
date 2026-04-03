@@ -59,6 +59,10 @@ async function processWAQueue() {
 }
 
 async function safeSendMessage(sock, jid, content, options = {}, delay = DELAYS.send, priority = false) {
+  if (!sock) {
+    logger.warn('queue', `safeSendMessage: sock indisponível (modo Evolution) — use transport.sendText para ${jid}`)
+    return null
+  }
   try {
     return await enqueueWA(`sendMessage:${jid}`, () => sock.sendMessage(jid, content, options), delay, priority)
   } catch {
@@ -67,6 +71,10 @@ async function safeSendMessage(sock, jid, content, options = {}, delay = DELAYS.
 }
 
 async function safeDelete(sock, groupJid, key, participant) {
+  if (!sock) {
+    logger.info('queue', `safeDelete ignorado: sock indisponível (modo Evolution) — grupo ${groupJid}`)
+    return
+  }
   const finalKey = {
     remoteJid: key.remoteJid,
     fromMe: key.fromMe || false,
@@ -86,6 +94,10 @@ async function safeDelete(sock, groupJid, key, participant) {
 }
 
 async function safeRemove(sock, groupJid, userJid) {
+  if (!sock) {
+    logger.warn('queue', `safeRemove ignorado: sock indisponível (modo Evolution) — não é possível remover ${userJid} de ${groupJid}`)
+    return
+  }
   try {
     await enqueueWA(`remove:${groupJid}:${userJid}`, () => sock.groupParticipantsUpdate(groupJid, [userJid], 'remove'), DELAYS.remove, true)
   } catch {

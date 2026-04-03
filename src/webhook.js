@@ -2,12 +2,12 @@
  * src/webhook.js
  *
  * Receiver de webhooks da Evolution API.
- * Rota: POST /webhook/evolution
+ * Rota: POST /webhook/evolution (registrada em dashboard.js)
  *
- * Integração com dashboard.js — este módulo expõe handleWebhookRequest,
- * que é registrado como handler da rota no servidor HTTP existente.
+ * Normaliza o payload da Evolution, extrai a mensagem relevante e
+ * encaminha ao pipeline real do Mahito (pipeline.js).
  *
- * Próximo bloco: conectar extractIncomingMessage ao pipeline do Mahito.
+ * Compatibilidade dupla: Baileys e webhook alimentam o mesmo pipeline.
  */
 
 const logger = require('./logger')
@@ -60,6 +60,41 @@ function extractIncomingMessage(payload) {
   }
 }
 
+/**
+ * Constrói um objeto de mensagem no formato interno do Mahito
+ * a partir dos dados extraídos do webhook da Evolution API.
+ *
+ * Este formato é compatível com o pipeline (pipeline.js) e com
+ * as funções que esperam a estrutura Baileys (getText, handleModeration, etc).
+ *
+ * Campos de mídia (imageMessage, videoMessage) não são populados —
+ * operações que dependem de downloadMediaMessage serão ignoradas
+ * naturalmente pelo pipeline (guards de `if (sock)` e checagem de campo).
+ *
+ * @param {object} extracted  Resultado de extractIncomingMessage
+ * @returns {object} Mensagem no formato interno do Mahito
+ */
+function buildPipelineMessage(extracted) {
+  const msg = {
+    key: {
+      remoteJid:  extracted.jid,
+      fromMe:     extracted.fromMe,
+      id:         extracted.messageId,
+      participant: extracted.participant || undefined
+    },
+    // Reconstuir campo message mínimo que getText() sabe ler
+    message: extracted.text
+      ? { conversation: extracted.text }
+      : null,
+    messageTimestamp: Math.floor(Date.now() / 1000),
+    pushName: extracted.pushName || '',
+    // Marcador de origem — permite ao pipeline distinguir se necessário
+    _source: 'evolution'
+  }
+
+  return msg
+}
+
 // ─── Leitura do body HTTP cru (built-in http, sem express) ───────────────────
 
 function readBody(req) {
@@ -85,9 +120,13 @@ function readBody(req) {
 
 /**
  * Handler para POST /webhook/evolution.
- * Registrar no servidor HTTP do dashboard.js.
+ * Registrado no servidor HTTP do dashboard.js.
+ *
+ * @param {object}      req   Request HTTP
+ * @param {object}      res   Response HTTP
+ * @param {object|null} sock  Socket Baileys do bot (passado por dashboard.js)
  */
-async function handleWebhookRequest(req, res) {
+async function handleWebhookRequest(req, res, sock) {
   let payload = null
 
   try {
@@ -100,24 +139,44 @@ async function handleWebhookRequest(req, res) {
     return
   }
 
+  // Resposta HTTP 200 imediata — processamento é assíncrono
+  res.writeHead(200, { 'Content-Type': 'application/json' })
+  res.end(JSON.stringify({ ok: true }))
+
   const evt = normalizeEvolutionEvent(payload)
   logger.info('webhook', `evento=${evt.event} instância=${evt.instance}`)
 
   if (evt.event === 'messages.upsert') {
-    const msg = extractIncomingMessage(payload)
-    if (!msg.fromMe && msg.text) {
-      logger.info('webhook', `msg de ${msg.jid} (${msg.pushName || 'sem nome'}): "${msg.text.slice(0, 100)}"`)
+    const extracted = extractIncomingMessage(payload)
+
+    if (extracted.fromMe) {
+      logger.info('webhook', `ignorando mensagem própria (fromMe) de ${extracted.jid}`)
+      return
     }
-    // TODO Bloco 3: passar msg para o pipeline principal do Mahito
+
+    if (!extracted.text) {
+      logger.info('webhook', `mensagem sem texto de ${extracted.jid} — ignorando (mídia não suportada via webhook ainda)`)
+      return
+    }
+
+    logger.info('webhook', `📩 msg de ${extracted.jid} (${extracted.pushName || 'sem nome'}): "${extracted.text.slice(0, 100)}"`)
+
+    // Construir mensagem no formato do pipeline e encaminhar
+    const pipelineMsg = buildPipelineMessage(extracted)
+
+    try {
+      const { processIncomingMessage } = require('./pipeline')
+      await processIncomingMessage(pipelineMsg, sock, 'notify')
+    } catch (pipeErr) {
+      logger.error('webhook', `Erro ao processar mensagem no pipeline: ${pipeErr.message}`)
+    }
+    return
   }
 
   if (evt.event === 'connection.update') {
     const status = evt.data.state || evt.data.status || 'unknown'
     logger.info('webhook', `conexão: ${status}`)
   }
-
-  res.writeHead(200, { 'Content-Type': 'application/json' })
-  res.end(JSON.stringify({ ok: true }))
 }
 
-module.exports = { handleWebhookRequest, normalizeEvolutionEvent, extractIncomingMessage }
+module.exports = { handleWebhookRequest, normalizeEvolutionEvent, extractIncomingMessage, buildPipelineMessage }

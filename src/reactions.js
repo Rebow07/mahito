@@ -42,6 +42,10 @@ function getStickerFile(category) {
 }
 
 async function enviarReacaoMahito(sock, jid, tipo) {
+  if (!sock) {
+    logger.info('reactions', `Reação '${tipo}' ignorada: sock indisponível (modo Evolution)`)
+    return false
+  }
   const filePath = getStickerFile(tipo)
   if (!filePath) return false
 

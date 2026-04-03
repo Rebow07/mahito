@@ -1,61 +1,23 @@
-const {
-  default: makeWASocket,
-  useMultiFileAuthState,
-  DisconnectReason,
-  fetchLatestBaileysVersion,
-  Browsers
-} = require('@whiskeysockets/baileys')
-const P = require('pino')
-const qrcode = require('qrcode-terminal')
+// ─── Carregar .env antes de qualquer decisão ─────────────────────────────────
+const path = require('path')
+require('dotenv').config({ path: path.join(__dirname, '../.env') })
 
 const { PATHS, state } = require('./state')
 const { ensureFiles } = require('./database')
-const { initTables, migrateFromJSON, addXP, getPermLevel, getGroupConfig, XP_PER_LEVEL, upsertChatKey, trackUserActivity, incrementWeeklyStat, getAutoReplies } = require('./db')
-const { loadConfig, isOwner } = require('./config')
-const { getText, getBaseJid, sleep, jidToNumber } = require('./utils')
+const { initTables, migrateFromJSON } = require('./db')
+const { loadConfig } = require('./config')
+const { getBaseJid, sleep } = require('./utils')
 const logger = require('./logger')
 
-const lidToJid = new Map()
-
 const transport = require('./transport/whatsapp')
-const transport = require('./transport/whatsapp')
-const { handleModeration, handleGroupParticipantsUpdate } = require('./moderation')
-const {
-  processOwnerPrivate,
-  processCustomerPrivate,
-  handleGroupCommands,
-  scheduleAllMessages
-} = require('./commands')
-const { isAdmin } = require('./group')
-const { checkAndUnlockAchievements, formatAchievementNotification } = require('./achievements')
-const { checkNSFW } = require('./nsfw')
-const { downloadMediaMessage } = require('@whiskeysockets/baileys')
+const { processIncomingMessage, lidToJid } = require('./pipeline')
+const { scheduleAllMessages } = require('./commands')
 
-function rememberRecentMessage(msg, text) {
-  const groupJid = getBaseJid(msg.key.remoteJid)
-  if (!groupJid || !groupJid.endsWith('@g.us')) return
-  if (msg.key.fromMe) return
+// rememberRecentMessage movido para pipeline.js
 
-  if (!state.recentGroupMessages[groupJid]) state.recentGroupMessages[groupJid] = []
+// ─── Boot sequence compartilhado ──────────────────────────────────────────────
 
-  const participant = msg.key.participant || msg.participant
-  const ts = msg.messageTimestamp
-  const timestamp = ts ? (typeof ts === 'number' ? ts * 1000 : Number(ts) * 1000) : Date.now()
-
-  state.recentGroupMessages[groupJid].push({
-    key: msg.key,
-    participant: participant,
-    timestamp,
-    text: text || ''
-  })
-  state.recentGroupMessages[groupJid] = state.recentGroupMessages[groupJid].slice(-300)
-}
-
-async function connect() {
-  ensureFiles()
-  console.clear()
-
-  const mahitoAscii = `
+const mahitoAscii = `
 \x1b[35m▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
 █                                                              █
 █   ███╗   ███╗ █████╗ ██╗  ██╗██╗████████╗ ██████╗           █
@@ -77,8 +39,12 @@ async function connect() {
 █                   Nascido em Março de 2026                  █
 ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓\x1b[0m
 `
+
+async function bootSequence() {
+  ensureFiles()
+  console.clear()
   console.log(mahitoAscii)
-  
+
   process.stdout.write('\x1b[36m⏳ Carregando neurônios . . . [\x1b[0m')
   for (let i = 0; i < 25; i++) {
     process.stdout.write('\x1b[36m█\x1b[0m')
@@ -86,10 +52,28 @@ async function connect() {
   }
   process.stdout.write('\x1b[36m] 100%\x1b[0m\n\n')
 
-  logger.info('index', '=== Iniciando Mahito Bot ===')
   try { migrateFromJSON() } catch (err) { logger.warn('index', `Migração JSON: ${err.message}`) }
+  return loadConfig()
+}
 
-  const config = loadConfig()
+// ─── Modo Baileys (ENABLE_EVOLUTION=false) ────────────────────────────────────
+
+async function connect() {
+  const config = await bootSequence()
+
+  logger.info('index', '=== Iniciando Mahito Bot (Baileys) ===')
+
+  // Dependências Baileys — carregadas apenas neste modo
+  const {
+    default: makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    fetchLatestBaileysVersion,
+    Browsers
+  } = require('@whiskeysockets/baileys')
+  const P = require('pino')
+  const qrcode = require('qrcode-terminal')
+
   const { state: authState, saveCreds } = await useMultiFileAuthState(PATHS.SESSION_DIR)
   const { version } = await fetchLatestBaileysVersion()
 
@@ -193,6 +177,7 @@ async function connect() {
 
   sock.ev.on('group-participants.update', async (update) => {
     if (!state.botReady) return
+    const { handleGroupParticipantsUpdate } = require('./moderation')
     await handleGroupParticipantsUpdate(sock, update)
   })
 
@@ -200,286 +185,51 @@ async function connect() {
     try {
       const msg = messages?.[0]
       if (!msg) return
-
-      const rawRemote = msg.key?.remoteJid || ''
-      const remoteJid = rawRemote ? getBaseJid(rawRemote) : 'unknown'
-      let senderJid = getBaseJid(msg.key?.participant || msg.participant || rawRemote)
-      const messageType = msg.message ? Object.keys(msg.message)[0] : 'no-message'
-
-      // 1. Normalizar o senderJid: se terminar com @lid, buscar o número real correspondente na tabela de contatos do Baileys
-      // ou simplesmente extrair só os dígitos para comparação.
-      if (senderJid && senderJid.endsWith('@lid')) {
-        const mapped = lidToJid.get(senderJid)
-        if (mapped) {
-          senderJid = getBaseJid(mapped)
-          logger.info('index', `💡 Resolvido @lid para ${senderJid}`)
-        }
-      }
-
-      logger.info('index', 'Mensagem recebida: ' + JSON.stringify({ jid: remoteJid, type: messageType, from: senderJid, isFromMe: !!msg.key?.fromMe, evType: type, botReady: state.botReady }))
-
-      if (!msg.message) return
-
-      const text = getText(msg.message)
-
-      if (remoteJid !== 'unknown' && msg.key.id) {
-        try {
-          upsertChatKey(
-            remoteJid,
-            msg.key.id,
-            msg.key.fromMe,
-            msg.messageTimestamp ? (typeof msg.messageTimestamp === 'number' ? msg.messageTimestamp * 1000 : Number(msg.messageTimestamp) * 1000) : Date.now(),
-            msg.key.participant || msg.participant || undefined
-          )
-        } catch (dbErr) {
-          logger.error('index', `Falha no upsertChatKey: ${dbErr.message}`)
-        }
-      }
-
-      if (msg.key.fromMe) return
-
-      // Always cache group messages
-      if (remoteJid && text) {
-        rememberRecentMessage(msg, text)
-      }
-
-      // Only moderate real-time messages
-      if (!state.botReady) return
-      if (type !== 'notify') return
-
-      const msgTime = msg.messageTimestamp || Math.floor(Date.now() / 1000)
-      if (Math.floor(Date.now() / 1000) - msgTime > 60) return
-
-
-      const currentConfig = loadConfig()
-
-      if (!remoteJid) return
-   
-      if (!remoteJid.endsWith('@g.us')) {
-        try {
-          if (isOwner(senderJid, currentConfig)) {
-            const { handlePersonalCommand } = require('./personal')
-            if (await handlePersonalCommand(text, sock, senderJid)) return
-            
-            if (text.trim() === '!testerelatorio') {
-              const { sendDailyReport } = require('./reports')
-              await sendDailyReport(sock)
-              return
-            }
-
-            const { processReminderCommand } = require('./scheduler')
-            if (await processReminderCommand(text, sock, senderJid, null)) return
-
-            const { processBroadcastCommand } = require('./broadcast')
-            if (await processBroadcastCommand(text, sock, senderJid)) return
-
-            const { processBotsCommand } = require('./bots')
-            if (await processBotsCommand(text, sock, senderJid)) return
-
-            await processOwnerPrivate(sock, senderJid, text, msg)
-          } else {
-            if (!text) return
-            await processCustomerPrivate(sock, senderJid, text)
-          }
-        } catch (privErr) {
-          logger.error('index', `Falha ao processar mensagem privada: ${privErr.message}`)
-        }
-        return
-      }
-
-      const { groupIsAllowed } = require('./moderation')
-      const allowed = groupIsAllowed(remoteJid)
-      if (!allowed) {
-        return
-      }
-
-      // ─── Activity Tracking (runs on ALL messages, including non-text) ───
-      try {
-        trackUserActivity(senderJid, remoteJid)
-        incrementWeeklyStat(remoteJid, 'total_messages')
-      } catch (trackErr) {
-        logger.error('index', `Activity tracking: ${trackErr.message}`)
-      }
-
-      // ─── Anti-NSFW Check (runs on image messages) ───
-      try {
-        const groupConfig = getGroupConfig(remoteJid)
-        const imageMsg = msg.message?.imageMessage || msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage
-        if (groupConfig && groupConfig.anti_nsfw_enabled && imageMsg) {
-          const permLevel = getPermLevel(senderJid, remoteJid)
-          if (permLevel === 0) {
-            const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger: P({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage })
-            const result = await checkNSFW(buffer)
-            if (result.match) {
-              logger.warn('index', `[NSFW] Imagem bloqueada de ${senderJid} no grupo ${remoteJid} (${result.similarity}% - ${result.matchedFile})`)
-              try { await sock.sendMessage(remoteJid, { delete: msg.key }) } catch {}
-              const { addStrikeDB } = require('./db')
-              const { sendStrikeWarning } = require('./moderation')
-              const count = addStrikeDB(senderJid, remoteJid)
-              await sendStrikeWarning(sock, remoteJid, senderJid, count, groupConfig.max_penalties, 'conteúdo proibido (NSFW)')
-              if (count >= groupConfig.max_penalties) {
-                const { safeRemove } = require('./queue')
-                const { resetStrikesDB } = require('./db')
-                await safeRemove(sock, remoteJid, senderJid)
-                resetStrikesDB(senderJid, remoteJid)
-              }
-              return
-            }
-          }
-        }
-      } catch (nsfwErr) {
-        logger.error('index', `Anti-NSFW: ${nsfwErr.message}`)
-      }
-
-      if (!text) return
-
-      // ─── Slow Mode Check ───
-      try {
-        const groupConfig = getGroupConfig(remoteJid)
-        if (groupConfig && groupConfig.slow_mode_seconds > 0) {
-          const permLevel = getPermLevel(senderJid, remoteJid)
-          const admin = await isAdmin(sock, remoteJid, senderJid)
-          if (permLevel === 0 && !admin && !isOwner(senderJid, currentConfig)) {
-            const key = `slow:${senderJid}:${remoteJid}`
-            const lastSent = state.slowModeTracker?.get(key) || 0
-            const now = Date.now()
-            if (now - lastSent < groupConfig.slow_mode_seconds * 1000) {
-              try { await sock.sendMessage(remoteJid, { delete: msg.key }) } catch {}
-              return
-            }
-            if (!state.slowModeTracker) state.slowModeTracker = new Map()
-            state.slowModeTracker.set(key, now)
-          }
-        }
-      } catch (slowErr) {
-        logger.error('index', `Slow mode: ${slowErr.message}`)
-      }
-
-      // ─── XP System ───
-      try {
-        const groupConfig = getGroupConfig(remoteJid)
-        if (groupConfig) {
-          const permLevel = getPermLevel(senderJid, remoteJid)
-          if (groupConfig.xp_enabled && permLevel === 0 && text.length > 1) {
-            const { processXp } = require('./xp')
-            const msgType = Object.keys(msg.message || {})[0] || 'conversation'
-            const result = processXp(senderJid, remoteJid, msgType)
-            if (result && result.leveledUp) {
-              await transport.sendText(remoteJid,
-                `⭐ @${jidToNumber(senderJid)} subiu para o *Nível ${result.newLevel}*! 🎉\nXP total: ${result.xp}`,
-                { mentions: [senderJid] }
-              )
-            }
-          }
-
-          // ─── Achievements Check ───
-          if (groupConfig.achievements_enabled) {
-            const newAchievements = checkAndUnlockAchievements(senderJid, remoteJid)
-            for (const key of newAchievements) {
-              const notification = formatAchievementNotification(key)
-              if (notification) {
-                await transport.sendText(remoteJid,
-                  `@${jidToNumber(senderJid)} ${notification}`,
-                  { mentions: [senderJid] }
-                )
-              }
-            }
-          }
-        }
-      } catch (xpErr) {
-        logger.error('index', `Falha no sistema de XP/Achievements: ${xpErr.message}`)
-      }
-
-      // ─── Auto-Reply System ───
-      try {
-        const groupConfig = getGroupConfig(remoteJid)
-        if (groupConfig && groupConfig.auto_reply_enabled) {
-          const replies = getAutoReplies(remoteJid)
-          const lowerText = text.toLowerCase()
-          for (const reply of replies) {
-            if (lowerText.includes(reply.trigger_word)) {
-              await transport.sendText(remoteJid, reply.response)
-              break
-            }
-          }
-        }
-      } catch (arErr) {
-        logger.error('index', `Auto-reply: ${arErr.message}`)
-      }
-
-      // Group Commands
-      try {
-        const admin = await isAdmin(sock, remoteJid, senderJid)
-        const isBotOwner = isOwner(senderJid, currentConfig)
-        
-        if (isBotOwner || admin) {
-          const { processXpCommand } = require('./xp')
-          if (await processXpCommand(sock, remoteJid, senderJid, text, true)) return
-          const { processSpamCommand } = require('./moderation')
-          if (await processSpamCommand(sock, remoteJid, senderJid, text, true)) return
-          const { processReminderCommand } = require('./scheduler')
-          if (await processReminderCommand(text, sock, senderJid, remoteJid)) return
-        }
-
-        const { processCustomCommand } = require('./custom-commands')
-        const handledCustom = await processCustomCommand(text, remoteJid, senderJid, sock, isBotOwner || admin, state.recentGroupMessages[remoteJid])
-        if (handledCustom) return
-
-        const handled = await handleGroupCommands(sock, msg, text, remoteJid, senderJid, admin, isBotOwner)
-        if (handled) return
-      } catch (cmdErr) {
-        logger.error('index', `Falha nos comandos de grupo: ${cmdErr.message}`, { stack: cmdErr.stack })
-      }
-
-      // Moderation
-      try {
-        await handleModeration(sock, msg)
-      } catch (modErr) {
-        logger.error('index', `Falha na moderação: ${modErr.message}`)
-      }
-
-      // Persona Engine
-      try {
-        const groupConfig = getGroupConfig(remoteJid) || {}
-        if (groupConfig.persona_id) {
-          const { getPersona } = require('./db')
-          const persona = getPersona(groupConfig.persona_id)
-          if (persona && persona.ai_reply_enabled) {
-            const botNumber = currentConfig.phoneNumber
-            const botJid = `${botNumber}@s.whatsapp.net`
-            // 3. Garantir que o persona-engine é chamado quando a mensagem vem de @lid (lid groups ou menção por lid)
-            const botLidJid = sock.user?.lid ? getBaseJid(sock.user.lid) : null
-            const botLidNumber = botLidJid ? jidToNumber(botLidJid) : null
-
-            const mentioned = text.includes(`@${botNumber}`) || (botLidNumber && text.includes(`@${botLidNumber}`))
-            const quotedParticipant = msg.message?.extendedTextMessage?.contextInfo?.participant
-            const quotedBot = quotedParticipant && (
-              quotedParticipant === botJid ||
-              (botLidJid && quotedParticipant === botLidJid) ||
-              (sock.user?.id && getBaseJid(quotedParticipant) === getBaseJid(sock.user.id))
-            )
-
-            if (persona.ai_always_on || mentioned || quotedBot) {
-              const { generateResponse } = require('./ai/persona-engine')
-              const history = state.recentGroupMessages[remoteJid] || []
-              const aiResp = await generateResponse(remoteJid, senderJid, text, history, persona, require('./db'))
-              await transport.sendText(remoteJid, aiResp)
-            }
-          }
-        }
-      } catch (aiErr) {
-        logger.error('index', `Erro IA general reply: ${aiErr.message}`)
-      }
-
+      await processIncomingMessage(msg, sock, type)
     } catch (criticalErr) {
-       logger.error('index', `Falha crítica no pipeline de mensagem: ${criticalErr.message}`, { stack: criticalErr.stack })
+      logger.error('index', `Falha crítica no pipeline de mensagem: ${criticalErr.message}`, { stack: criticalErr.stack })
     }
   })
 }
 
+// ─── Modo Evolution API (ENABLE_EVOLUTION=true) ──────────────────────────────
+
+async function startEvolutionMode() {
+  const config = await bootSequence()
+
+  logger.info('index', '=== Iniciando Mahito Bot (Evolution API — sem Baileys) ===')
+  logger.info('index', '📡 Modo webhook-only: Baileys desativado, recebendo via POST /webhook/evolution')
+
+  state.botReady = true
+  transport.init(null) // Sem socket Baileys — transport usa Evolution API
+
+  logger.info('index', `🟢 Bot pronto (Evolution API)! Bot: ${config.phoneNumber} | Dono: ${config.ownerNumbers.join(', ')} | 🗄️ SQLite`)
+
+  // Schedulers (recebem null — envios são feitos via transport layer)
+  scheduleAllMessages(null)
+  try { const { initPersonalScheduler } = require('./personal'); initPersonalScheduler() } catch(e) { logger.error('index', `Personal init: ${e.message}`) }
+  try { const { initReminderScheduler } = require('./scheduler'); initReminderScheduler(null) } catch(e) { logger.error('index', `Scheduler init: ${e.message}`) }
+  try { const { scheduleDaily } = require('./reports'); scheduleDaily(null) } catch(e) { logger.error('index', `Reports init: ${e.message}`) }
+
+  // Dashboard + Webhook receiver
+  try { const { startDashboard } = require('./dashboard'); startDashboard(null) } catch (err) { logger.error('index', `[DASHBOARD] Erro: ${err.message}`) }
+
+  // Mensagem de boot via transport (Evolution API)
+  for (const ownerNumber of (config.ownerNumbers || [])) {
+    const jid = `${ownerNumber}@s.whatsapp.net`
+    await transport.sendText(jid, config.bootMessage || '😈 Mahito reiniciou (Evolution API). Sem Baileys. SQLite ativo.')
+  }
+
+  logger.info('index', '🌐 Servidor HTTP ativo — aguardando webhooks da Evolution API')
+}
+
+// ─── Entry Point ─────────────────────────────────────────────────────────────
+
 process.on('uncaughtException',  (err) => logger.error('process', `Uncaught Exception: ${err.message || err}`, { stack: err.stack }))
 process.on('unhandledRejection', (reason) => logger.error('process', `Unhandled Rejection: ${reason instanceof Error ? reason.message : reason}`))
 
-connect().catch(err => {
+const startFn = process.env.ENABLE_EVOLUTION === 'true' ? startEvolutionMode : connect
+
+startFn().catch(err => {
   logger.error('process', `Erro fatal: ${err.message || err}`)
 })

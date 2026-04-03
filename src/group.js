@@ -7,6 +7,13 @@ async function getGroupMeta(sock, groupJid, forceRefresh = false) {
   const ttl = 5 * 60 * 1000
   const cached = state.groupMetaCache.get(groupJid)
 
+  // Modo Evolution (sock=null): retorna cache se disponível
+  if (!sock) {
+    if (cached?.data) return cached.data
+    logger.info('group', `getGroupMeta: sock indisponível (modo Evolution) e sem cache para ${groupJid}`)
+    return null
+  }
+
   if (!forceRefresh && cached && (now - cached.timestamp) < ttl) {
     return cached.data
   }
