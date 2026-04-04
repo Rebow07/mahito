@@ -196,17 +196,17 @@ function resolveUser(jid, groupId = null) {
         const canonical = canonicalUserKey(baseUserJid)
         const userData = getUserData(canonical, getBaseJid(groupId))
         if (userData?.push_name && userData.push_name.trim().length > 0) {
-          return `${userData.push_name.trim()} (LID)`
+          return userData.push_name.trim()
         }
       }
     } catch { /* silencioso */ }
 
-    // pushName conhecido mas sem número/JID — exibe nome com indicador LID
+    // pushName conhecido mas sem número/JID — exibe só o nome
     if (id.pushName && id.pushName.trim().length > 0) {
-      return `${id.pushName.trim()} (LID)`
+      return id.pushName.trim()
     }
-    // Fallback absoluto
-    return `[Oculto: ${baseUserJid.split('@')[0]}]`
+    // Fallback absoluto: não expor dígitos internos do LID para o usuário
+    return 'Usuário'
   }
 
   if (!baseUserJid.endsWith('@s.whatsapp.net')) return baseUserJid

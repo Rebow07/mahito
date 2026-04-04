@@ -67,6 +67,15 @@ function loadConfig() {
   if (process.env.GEMINI_KEY_2)
     config.geminiKey2 = process.env.GEMINI_KEY_2
 
+  if (process.env.NSFW_GEMINI_KEY_1)
+    config.nsfwGeminiKey1 = process.env.NSFW_GEMINI_KEY_1
+
+  if (process.env.NSFW_GEMINI_KEY_2)
+    config.nsfwGeminiKey2 = process.env.NSFW_GEMINI_KEY_2
+
+  if (process.env.GEMINI_FALLBACK_KEY)
+    config.geminiFallbackKey = process.env.GEMINI_FALLBACK_KEY
+
   if (process.env.GROQ_KEY)
     config.groqKey = process.env.GROQ_KEY
 
@@ -133,6 +142,26 @@ function isOwner(jid, config) {
         return 'master'
       }
     }
+  }
+
+  // Camada 1b: cross-reference via cache de identidade
+  // Se learnAlias conectou phone↔LID nesta sessão (ex: DM + grupo na mesma sessão),
+  // verifica se algum master owner tem esse LID em seus aliases conhecidos.
+  for (const ownerNum of masterOwners) {
+    try {
+      const ownerIdentity = resolveIdentity(`${ownerNum}@s.whatsapp.net`)
+      if (ownerIdentity.lid && identity.aliases.includes(ownerIdentity.lid)) {
+        logger.info('identity', `[OwnerCheck] Nível: master (cross-ref cache) | LID ${ownerIdentity.lid} ↔ número ${ownerNum}`)
+        return 'master'
+      }
+    } catch { /* silencioso */ }
+  }
+
+  // Se o executor veio como LID não configurado, logar dica de diagnóstico
+  const senderLid = identity.aliases.find(a => a && a.endsWith('@lid'))
+  if (senderLid) {
+    const lidDigitsHint = senderLid.split('@')[0]
+    logger.info('identity', `[OwnerCheck] LID ${lidDigitsHint} não reconhecido como owner. Se for o dono, adicione OWNER_LIDS=${lidDigitsHint} ao .env`)
   }
 
   // Camada 2: secondary owners (banco)

@@ -9,6 +9,9 @@ function initKeys() {
   const keys = [
     { id: 'gemini1', value: config.geminiKey1, type: 'gemini' },
     { id: 'gemini2', value: config.geminiKey2, type: 'gemini' },
+    { id: 'nsfw1', value: config.nsfwGeminiKey1, type: 'nsfw' },
+    { id: 'nsfw2', value: config.nsfwGeminiKey2, type: 'nsfw' },
+    { id: 'fallback', value: config.geminiFallbackKey, type: 'fallback' },
     { id: 'groq', value: config.groqKey, type: 'groq' }
   ]
 
@@ -24,6 +27,10 @@ function initKeys() {
   }
 }
 
+/**
+ * Obtém uma chave disponível para o tipo solicitado.
+ * Tipos: 'gemini', 'nsfw', 'fallback', 'groq'
+ */
 function getKey(type) {
   initKeys()
   const now = Date.now()
@@ -39,11 +46,6 @@ function getKey(type) {
         }
       }
     }
-  }
-
-  if (!bestKey) {
-    logger.warn('key-manager', `Nenhuma chave disponível para o tipo ${type} sem cooldown.`)
-    return null
   }
 
   return bestKey

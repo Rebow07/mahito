@@ -2,10 +2,11 @@ const http = require('http')
 const os = require('os')
 const url = require('url')
 const { getDB, getAllowedGroups, getGroupConfig, getGroupRanking, getTotalUsers, getWeeklyStats } = require('./db')
-const { state } = require('./state')
+const { state, PATHS } = require('./state')
 const { getBaseJid, jidToNumber } = require('./utils')
 const logger = require('./logger')
 const { handleWebhookRequest } = require('./webhook')
+const { getGroupMeta } = require('./group')
 
 function getLocalIP() {
   const interfaces = os.networkInterfaces()
@@ -39,12 +40,41 @@ function startDashboard(sock) {
     }
 
     if (parsed.pathname === '/api/groups') {
-      const groups = getAllowedGroups()
+      const allowedGroups = getAllowedGroups()
+
+      // ─── Fallback Evolution: se allowed_groups estiver vazio, busca direto na API ───
+      // O dashboard mostra todos os grupos da instância. A tabela allowed_groups controla
+      // apenas onde os comandos do bot estão habilitados, não o que o dashboard exibe.
+      if (allowedGroups.length === 0) {
+        try {
+          const evolution = require('./evolution')
+          const evoGroups = await evolution.fetchAllGroups(false)
+          if (evoGroups && evoGroups.length > 0) {
+            const data = evoGroups.map(g => {
+              const gc = getGroupConfig(g.id) || null
+              return {
+                id: g.id,
+                name: g.subject || g.name || g.id,
+                desc: g.desc || g.description || '',
+                memberCount: g.size || 0,
+                adminCount: 0,
+                admins: [],
+                config: gc
+              }
+            })
+            return sendJSON(res, data)
+          }
+        } catch (evoErr) {
+          logger.warn('dashboard', `fetchAllGroups fallback falhou: ${evoErr.message}`)
+        }
+      }
+
+      // ─── Caminho normal: allowed_groups do SQLite ───
       const data = []
-      for (const gid of groups) {
+      for (const gid of allowedGroups) {
         const gc = getGroupConfig(gid)
         let meta = null
-        try { meta = await sockRef.groupMetadata(gid) } catch {}
+        try { meta = await getGroupMeta(sockRef, gid) } catch {}
         const admins = (meta?.participants || []).filter(p => p.admin === 'admin' || p.admin === 'superadmin')
         data.push({
           id: gid,
@@ -63,7 +93,7 @@ function startDashboard(sock) {
       const groupId = parsed.query.group
       if (!groupId) return sendJSON(res, [])
       try {
-        const meta = await sockRef.groupMetadata(groupId)
+        const meta = await getGroupMeta(sockRef, groupId)
         const participants = (meta?.participants || []).map(p => {
           // p.jid has the real phone number, p.id has the LID
           const phoneJid = p.jid || p.id || ''
@@ -94,7 +124,7 @@ function startDashboard(sock) {
       const groupId = parsed.query.group
       if (!groupId) return sendJSON(res, { error: 'no group' })
       try {
-        const meta = await sockRef.groupMetadata(groupId)
+        const meta = await getGroupMeta(sockRef, groupId)
         const sample = (meta?.participants || []).slice(0, 3).map(p => {
           const dump = {}
           for (const key of Object.keys(p)) dump[key] = p[key]
@@ -121,7 +151,7 @@ function startDashboard(sock) {
       const groupId = parsed.query.group
       if (!groupId) { res.writeHead(400); res.end('Missing group'); return }
       try {
-        const meta = await sockRef.groupMetadata(groupId)
+        const meta = await getGroupMeta(sockRef, groupId)
         const csv = 'Numero,Nome,Cargo\n' + (meta?.participants || []).map(p => {
           const phoneJid = p.jid || p.id || ''
           const num = String(phoneJid).split('@')[0].split(':')[0]

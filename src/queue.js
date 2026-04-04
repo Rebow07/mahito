@@ -1,23 +1,34 @@
+/**
+ * src/queue.js
+ *
+ * Fila de operações WhatsApp — Evolution API only.
+ * Todas as operações de envio, remoção, promoção, deleção e configurações de grupo
+ * passam por aqui. O sock Baileys é aceito como parâmetro mas nunca usado.
+ *
+ * Funções exportadas:
+ *   safeSendMessage   — Envia texto/mídia/sticker via transport
+ *   safeDelete        — Apaga mensagem via Evolution API
+ *   safeRemove        — Remove participante do grupo
+ *   safePromote       — Promove participante a admin
+ *   safeDemote        — Rebaixa admin a membro
+ *   safeUpdateGroupSetting — Altera configuração do grupo
+ *   sendDiscordLog    — Envia log para webhook do Discord
+ */
+
+'use strict'
+
 const axios = require('axios')
 const { state, DELAYS } = require('./state')
-const { sleep, isRateLimitError } = require('./utils')
+const { sleep } = require('./utils')
 const logger = require('./logger')
 
-const MAX_RETRIES = 2
-
-function isSessionError(err) {
-  const msg = String(err?.message || err || '').toLowerCase()
-  return msg.includes('no sessions') || msg.includes('not-acceptable') || msg.includes('bad-request')
-}
+// ─── Fila interna (mantida para compatibilidade de código legado) ─────────────
 
 function enqueueWA(name, fn, delayMs, priority = false) {
   return new Promise((resolve, reject) => {
     const item = { name, fn, delayMs, resolve, reject, retries: 0 }
-    if (priority) {
-      state.waQueue.unshift(item)
-    } else {
-      state.waQueue.push(item)
-    }
+    if (priority) state.waQueue.unshift(item)
+    else state.waQueue.push(item)
     processWAQueue()
   })
 }
@@ -25,187 +36,259 @@ function enqueueWA(name, fn, delayMs, priority = false) {
 async function processWAQueue() {
   if (state.waQueueRunning) return
   state.waQueueRunning = true
-
   while (state.waQueue.length > 0) {
     const item = state.waQueue.shift()
     try {
       const result = await item.fn()
       item.resolve(result)
     } catch (err) {
-      if (isRateLimitError(err)) {
-        logger.warn('queue', `Rate limit em ${item.name}. Aguardando 15s...`)
-        await sleep(15000)
-        item.reject(err)
-      } else if (isSessionError(err) && item.retries < MAX_RETRIES) {
-        // Re-enqueue at the end with increased retry count
-        item.retries++
-        logger.warn('queue', `Retry ${item.retries}/${MAX_RETRIES} para ${item.name} (session error)`)
-        await sleep(3000)
-        state.waQueue.push(item) // Put at end of queue
-      } else {
-        // Final failure — log once and resolve with null to not crash
-        if (item.retries >= MAX_RETRIES) {
-          logger.error('queue', `Descartado após ${MAX_RETRIES} tentativas: ${item.name}`)
-        } else {
-          logger.error('queue', `Erro em ${item.name}: ${err.message || err}`)
-        }
-        item.reject(err)
-      }
+      logger.error('queue', `Erro em ${item.name}: ${err.message || err}`)
+      item.reject(err)
     }
     await sleep(item.delayMs || DELAYS.send)
   }
-
   state.waQueueRunning = false
 }
 
-async function safeSendMessage(sock, jid, content, options = {}, delay = DELAYS.send, priority = false) {
-  if (!sock) {
-    logger.warn('queue', `safeSendMessage: sock indisponível (modo Evolution) — use transport.sendText para ${jid}`)
+// ─── safeSendMessage ──────────────────────────────────────────────────────────
+
+/**
+ * Envia mensagem de texto (e opcionalmente mídia/sticker) via Evolution API.
+ * O parâmetro `sock` é aceito mas ignorado — mantido apenas para compatibilidade.
+ *
+ * @param {*}      _sock    Ignorado (Baileys socket — não usado)
+ * @param {string} jid      JID do destinatário
+ * @param {object} content  Conteúdo da mensagem:
+ *                            { text }                     → texto
+ *                            { image: Buffer, caption }   → imagem (base64)
+ *                            { sticker: Buffer }          → figurinha (base64)
+ *                            { video: Buffer, caption }   → vídeo (base64)
+ *                            { audio: Buffer, ptt }       → áudio (base64)
+ *                            { document: Buffer, ... }    → documento (base64)
+ *                            { delete: key }              → deletar mensagem
+ * @param {object} [opts]   Opções adicionais:
+ *                            { mentions: string[] }       → JIDs a mencionar
+ *                            { quoted: object }           → mensagem a citar
+ * @param {number} [_delay] Ignorado (mantido por compatibilidade)
+ * @param {boolean} [_priority] Ignorado
+ */
+async function safeSendMessage(_sock, jid, content, opts = {}, _delay, _priority) {
+  const transport = require('./transport/whatsapp')
+  const mentions = opts?.mentions || content?.mentions || []
+  const quoted   = opts?.quoted   || content?.quoted   || null
+
+  try {
+    // ─── Deletar mensagem ───
+    if (content?.delete) {
+      const key = content.delete
+      const evolution = require('./evolution')
+      await evolution.deleteMessage(key.remoteJid || jid, key.id, false)
+      return null
+    }
+
+    // ─── Texto ───
+    if (content?.text) {
+      return await transport.sendText(jid, content.text, { mentions, quoted })
+    }
+
+    // ─── Sticker (Buffer) ───
+    if (content?.sticker) {
+      const buf = content.sticker
+      const base64 = `data:image/webp;base64,${Buffer.isBuffer(buf) ? buf.toString('base64') : buf}`
+      return await transport.sendSticker(jid, base64)
+    }
+
+    // ─── Imagem (Buffer) ───
+    if (content?.image) {
+      const buf = content.image
+      const base64 = `data:image/jpeg;base64,${Buffer.isBuffer(buf) ? buf.toString('base64') : buf}`
+      return await transport.sendMedia(jid, base64, content.caption || '', { mediatype: 'image', mentions, quoted })
+    }
+
+    // ─── Vídeo (Buffer) ───
+    if (content?.video) {
+      const buf = content.video
+      const base64 = `data:video/mp4;base64,${Buffer.isBuffer(buf) ? buf.toString('base64') : buf}`
+      return await transport.sendMedia(jid, base64, content.caption || '', { mediatype: 'video', mentions, quoted })
+    }
+
+    // ─── Áudio (Buffer) ───
+    if (content?.audio) {
+      const buf = content.audio
+      const base64 = `data:audio/ogg;base64,${Buffer.isBuffer(buf) ? buf.toString('base64') : buf}`
+      return await transport.sendAudio(jid, base64, !!(content.ptt))
+    }
+
+    // ─── Documento (Buffer) ───
+    if (content?.document) {
+      const buf = content.document
+      const mime = content.mimetype || 'application/octet-stream'
+      const base64 = `data:${mime};base64,${Buffer.isBuffer(buf) ? buf.toString('base64') : buf}`
+      return await transport.sendMedia(jid, base64, content.caption || '', {
+        mediatype: 'document',
+        mimetype: mime,
+        fileName: content.fileName || 'arquivo',
+        mentions, quoted
+      })
+    }
+
+    // ─── URL de mídia (string) ───
+    if (content?.url) {
+      return await transport.sendMedia(jid, content.url, content.caption || '', { mentions, quoted })
+    }
+
+    logger.warn('queue', `safeSendMessage: conteúdo não reconhecido para ${jid}: ${JSON.stringify(Object.keys(content || {}))}`)
+    return null
+  } catch (err) {
+    logger.error('queue', `safeSendMessage falhou para ${jid}: ${err.message}`)
     return null
   }
-  try {
-    return await enqueueWA(`sendMessage:${jid}`, () => sock.sendMessage(jid, content, options), delay, priority)
-  } catch {
-    return null
-  }
 }
 
-async function safeDelete(sock, groupJid, key, participant) {
-  if (!sock) {
-    logger.info('queue', `safeDelete ignorado: sock indisponível (modo Evolution) — grupo ${groupJid}`)
-    return
-  }
-  const finalKey = {
-    remoteJid: key.remoteJid,
-    fromMe: key.fromMe || false,
-    id: key.id
-  }
+// ─── safeDelete ───────────────────────────────────────────────────────────────
 
-  const p = key.participant || participant
-  if (p) {
-    finalKey.participant = p
-  }
-
+/**
+ * Apaga uma mensagem via Evolution API.
+ * @param {*}      _sock       Ignorado
+ * @param {string} groupJid    JID do grupo/chat
+ * @param {object} key         { id, remoteJid, fromMe, participant }
+ * @param {string} [participant]
+ */
+async function safeDelete(_sock, groupJid, key, participant) {
   try {
-    await enqueueWA(`delete:${groupJid}`, () => sock.sendMessage(groupJid, { delete: finalKey }), DELAYS.delete)
-  } catch {
-    // Silently ignore delete failures
-  }
-}
-
-async function safeRemove(sock, groupJid, userJid) {
-  const processEvolution = async () => {
-    logger.info('queue', `[Provider] Evolution API acionada para REMOVE | Alvo: ${userJid} | Grupo: ${groupJid}`)
     const evolution = require('./evolution')
-    return await evolution.updateParticipant(groupJid, 'remove', [userJid])
-  }
-
-  if (!sock) {
-    logger.info('queue', `[Provider] Evolution-Only. Não há fallback Baileys disponível.`)
-    const success = await processEvolution()
-    if (!success) logger.warn('queue', `[Resultado] Falha ao remover ${userJid} via Evolution-Only.`)
-    else logger.info('queue', `[Resultado] Sucesso na Evolution API.`)
-    return
-  }
-
-  if (process.env.ENABLE_EVOLUTION === 'true') {
-     logger.info('queue', `[Provider] Híbrido. Tentativa Evolution primeiro...`)
-     const success = await processEvolution()
-     if (success) {
-         logger.info('queue', `[Resultado] Sucesso na Evolution API.`)
-         return
-     }
-     logger.warn('queue', `[Fallback] Evolution falhou. Acionando fallback Baileys...`)
-  }
-
-  try {
-    logger.info('queue', `[Provider] Baileys | Payload: { grupo: ${groupJid}, method: groupParticipantsUpdate, acao: 'remove', alvo: ${userJid} }`)
-    await enqueueWA(`remove:${groupJid}:${userJid}`, () => sock.groupParticipantsUpdate(groupJid, [userJid], 'remove'), DELAYS.remove, true)
+    const msgId = key?.id || key
+    const remoteJid = key?.remoteJid || groupJid
+    if (!msgId) {
+      logger.warn('queue', `safeDelete: messageId não fornecido para ${groupJid}`)
+      return
+    }
+    logger.info('queue', `[safeDelete] Apagando msg ${msgId} em ${groupJid}`)
+    await evolution.deleteMessage(remoteJid, msgId, false)
   } catch (err) {
-    logger.error('queue', `[Resultado] Baileys Falhou | Motivo: ${err.message}`)
+    logger.error('queue', `safeDelete falhou para ${groupJid}: ${err.message}`)
   }
 }
 
-async function safePromote(sock, groupJid, userJid) {
-  const processEvolution = async () => {
-    logger.info('queue', `[Provider] Evolution API acionada para PROMOTE | Alvo: ${userJid} | Grupo: ${groupJid}`)
+// ─── safeRemove ───────────────────────────────────────────────────────────────
+
+/**
+ * Remove um participante do grupo via Evolution API.
+ * @param {*}      _sock     Ignorado
+ * @param {string} groupJid
+ * @param {string} userJid
+ */
+async function safeRemove(_sock, groupJid, userJid) {
+  try {
     const evolution = require('./evolution')
-    return await evolution.updateParticipant(groupJid, 'promote', [userJid])
-  }
-  if (!sock) {
-    const success = await processEvolution()
-    if (!success) logger.warn('queue', `[Resultado] Falha no PROMOTE via Evolution-Only.`)
-    return
-  }
-  if (process.env.ENABLE_EVOLUTION === 'true') {
-     const success = await processEvolution()
-     if (success) return
-     logger.warn('queue', `[Fallback] PROMOTE Evolution falhou. Acionando Baileys...`)
-  }
-  try {
-    logger.info('queue', `[Provider] Baileys | Ação: PROMOTE | Alvo: ${userJid}`)
-    await enqueueWA(`promote:${groupJid}:${userJid}`, () => sock.groupParticipantsUpdate(groupJid, [userJid], 'promote'), 1500, true)
+    logger.info('queue', `[safeRemove] Removendo ${userJid} de ${groupJid}`)
+    const ok = await evolution.updateParticipant(groupJid, 'remove', [userJid])
+    if (!ok) logger.warn('queue', `[safeRemove] Falha ao remover ${userJid} de ${groupJid}`)
+    return ok
   } catch (err) {
-    logger.error('queue', `[Resultado] Baileys PROMOTE Falhou | Motivo: ${err.message}`)
+    logger.error('queue', `safeRemove falhou: ${err.message}`)
+    return false
   }
 }
 
-async function safeDemote(sock, groupJid, userJid) {
-  const processEvolution = async () => {
-    logger.info('queue', `[Provider] Evolution API acionada para DEMOTE | Alvo: ${userJid} | Grupo: ${groupJid}`)
-    const evolution = require('./evolution')
-    return await evolution.updateParticipant(groupJid, 'demote', [userJid])
-  }
-  if (!sock) {
-    const success = await processEvolution()
-    if (!success) logger.warn('queue', `[Resultado] Falha no DEMOTE via Evolution-Only.`)
-    return
-  }
-  if (process.env.ENABLE_EVOLUTION === 'true') {
-     const success = await processEvolution()
-     if (success) return
-     logger.warn('queue', `[Fallback] DEMOTE Evolution falhou. Acionando Baileys...`)
-  }
+// ─── safeAdd ─────────────────────────────────────────────────────────────────
+
+/**
+ * Adiciona um participante ao grupo via Evolution API.
+ * @param {*}      _sock     Ignorado
+ * @param {string} groupJid
+ * @param {string} userJid
+ */
+async function safeAdd(_sock, groupJid, userJid) {
   try {
-    logger.info('queue', `[Provider] Baileys | Ação: DEMOTE | Alvo: ${userJid}`)
-    await enqueueWA(`demote:${groupJid}:${userJid}`, () => sock.groupParticipantsUpdate(groupJid, [userJid], 'demote'), 1500, true)
+    const evolution = require('./evolution')
+    logger.info('queue', `[safeAdd] Adicionando ${userJid} ao grupo ${groupJid}`)
+    const ok = await evolution.updateParticipant(groupJid, 'add', [userJid])
+    if (!ok) logger.warn('queue', `[safeAdd] Falha ao adicionar ${userJid} ao ${groupJid}`)
+    return ok
   } catch (err) {
-    logger.error('queue', `[Resultado] Baileys DEMOTE Falhou | Motivo: ${err.message}`)
+    logger.error('queue', `safeAdd falhou: ${err.message}`)
+    return false
   }
 }
 
-async function safeUpdateGroupSetting(sock, groupJid, action) {
-  const processEvolution = async () => {
-    logger.info('queue', `[Provider] Evolution API acionada para GROUP SETTING | Ação: ${action} | Grupo: ${groupJid}`)
-    const evolution = require('./evolution')
-    return await evolution.updateGroupSetting(groupJid, action)
-  }
-  if (!sock) {
-    const success = await processEvolution()
-    if (!success) logger.warn('queue', `[Resultado] Falha no GROUP SETTING via Evolution-Only.`)
-    return
-  }
-  if (process.env.ENABLE_EVOLUTION === 'true') {
-     const success = await processEvolution()
-     if (success) return
-     logger.warn('queue', `[Fallback] GROUP SETTING Evolution falhou. Acionando Baileys...`)
-  }
+// ─── safePromote ─────────────────────────────────────────────────────────────
+
+/**
+ * Promove um participante a admin via Evolution API.
+ * @param {*}      _sock     Ignorado
+ * @param {string} groupJid
+ * @param {string} userJid
+ */
+async function safePromote(_sock, groupJid, userJid) {
   try {
-    logger.info('queue', `[Provider] Baileys | Ação: GROUP SETTING ${action}`)
-    await enqueueWA(`settings:${groupJid}`, () => sock.groupSettingUpdate(groupJid, action), 2000, true)
+    const evolution = require('./evolution')
+    logger.info('queue', `[safePromote] Promovendo ${userJid} em ${groupJid}`)
+    const ok = await evolution.updateParticipant(groupJid, 'promote', [userJid])
+    if (!ok) logger.warn('queue', `[safePromote] Falha ao promover ${userJid}`)
+    return ok
   } catch (err) {
-    logger.error('queue', `[Resultado] Baileys GROUP SETTING Falhou | Motivo: ${err.message}`)
+    logger.error('queue', `safePromote falhou: ${err.message}`)
+    return false
   }
 }
+
+// ─── safeDemote ───────────────────────────────────────────────────────────────
+
+/**
+ * Rebaixa um admin a membro via Evolution API.
+ * @param {*}      _sock     Ignorado
+ * @param {string} groupJid
+ * @param {string} userJid
+ */
+async function safeDemote(_sock, groupJid, userJid) {
+  try {
+    const evolution = require('./evolution')
+    logger.info('queue', `[safeDemote] Rebaixando ${userJid} em ${groupJid}`)
+    const ok = await evolution.updateParticipant(groupJid, 'demote', [userJid])
+    if (!ok) logger.warn('queue', `[safeDemote] Falha ao rebaixar ${userJid}`)
+    return ok
+  } catch (err) {
+    logger.error('queue', `safeDemote falhou: ${err.message}`)
+    return false
+  }
+}
+
+// ─── safeUpdateGroupSetting ───────────────────────────────────────────────────
+
+/**
+ * Altera configuração do grupo via Evolution API.
+ * @param {*}      _sock     Ignorado
+ * @param {string} groupJid
+ * @param {'announcement'|'not_announcement'|'locked'|'unlocked'} action
+ */
+async function safeUpdateGroupSetting(_sock, groupJid, action) {
+  try {
+    const evolution = require('./evolution')
+    logger.info('queue', `[safeUpdateGroupSetting] action=${action} grupo=${groupJid}`)
+    const ok = await evolution.updateGroupSetting(groupJid, action)
+    if (!ok) logger.warn('queue', `[safeUpdateGroupSetting] Falha: action=${action}`)
+    return ok
+  } catch (err) {
+    logger.error('queue', `safeUpdateGroupSetting falhou: ${err.message}`)
+    return false
+  }
+}
+
+// ─── sendDiscordLog ───────────────────────────────────────────────────────────
 
 let discordDisabled = false
 
+/**
+ * Envia log para webhook do Discord.
+ * @param {string} text
+ * @param {object} config  { discordWebhookUrl }
+ */
 async function sendDiscordLog(text, config) {
-  if (!config.discordWebhookUrl || discordDisabled) return
+  if (!config?.discordWebhookUrl || discordDisabled) return
   try {
-    await axios.post(config.discordWebhookUrl, { content: text }, { timeout: 15000 })
+    await axios.post(config.discordWebhookUrl, { content: String(text).slice(0, 2000) }, { timeout: 15000 })
   } catch {
-    // Webhook inválido ou revogado — desabilita silenciosamente até o próximo restart
     discordDisabled = true
   }
 }
@@ -216,6 +299,7 @@ module.exports = {
   safeSendMessage,
   safeDelete,
   safeRemove,
+  safeAdd,
   safePromote,
   safeDemote,
   safeUpdateGroupSetting,

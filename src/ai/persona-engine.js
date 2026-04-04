@@ -21,7 +21,6 @@ async function callGemini(keyObj, systemInstruction, history, userMessage) {
     if (!h.text) continue
     const role = h.key.fromMe ? 'model' : 'user'
     const name = h.participant ? String(h.participant).split('@')[0] : 'user'
-    // Gemini doesn't fully support structured multi-user without formatting as text in user role
     if (role === 'user') {
        contents.push({ role: 'user', parts: [{ text: `${name} diz: ${h.text}` }] })
     } else {
@@ -35,7 +34,6 @@ async function callGemini(keyObj, systemInstruction, history, userMessage) {
     const result = await model.generateContent({ contents })
     const response = await result.response
     const text = response.text()
-    // Approximation of usage metadata if not explicitly provided perfectly by flash
     const tokens = result.response.usageMetadata?.totalTokenCount || Math.floor((JSON.stringify(contents).length + text.length) / 4)
     return { text, tokens }
   } catch (err) {
@@ -93,45 +91,47 @@ async function generateResponse(groupJid, senderJid, messageText, historyMsgs, p
   const senderNumber = senderJid ? String(senderJid).split('@')[0] : 'user'
   const userMessageContext = `${senderNumber} diz: ${messageText}`
 
-  // Rotation logic: Gemini 1 -> Gemini 2 -> Groq
+  // Ordem de Fallback: gemini1 -> gemini2 -> fallback -> groq
+  const keySequence = [
+    { type: 'gemini', id: 'gemini1' },
+    { type: 'gemini', id: 'gemini2' },
+    { type: 'fallback', id: 'fallback' },
+    { type: 'groq', id: 'groq' }
+  ]
+
   let result = null
 
-  // Try Gemini
-  let geminiKey = getKey('gemini')
-  if (geminiKey) {
+  for (const keyInfo of keySequence) {
+    const keyObj = getKey(keyInfo.type)
+    if (!keyObj) continue
+
     try {
-      result = await callGemini(geminiKey, systemInstruction, historyMsgs, userMessageContext)
-    } catch (err) {
-      logger.error('persona-engine', `Erro no Gemini (key: ${geminiKey.id}): ${err.message}`)
-      markError(geminiKey.id)
+      if (keyInfo.type === 'groq') {
+        result = await callGroq(keyObj, systemInstruction, historyMsgs, userMessageContext)
+      } else {
+        result = await callGemini(keyObj, systemInstruction, historyMsgs, userMessageContext)
+      }
       
-      // Tenta 2a chave Gemini se disponível
-      geminiKey = getKey('gemini')
-      if (geminiKey) {
-        try {
-          result = await callGemini(geminiKey, systemInstruction, historyMsgs, userMessageContext)
-        } catch (err2) {
-          logger.error('persona-engine', `Erro no Gemini (key 2: ${geminiKey.id}): ${err2.message}`)
-          markError(geminiKey.id)
-        }
+      if (result) {
+        logger.info('persona-engine', `Resposta gerada usando chave: ${keyObj.id} (${keyInfo.type})`)
+        break
+      }
+    } catch (err) {
+      const isRecoverable = /rate|quota|exhausted|token|limit|timeout|auth/i.test(err.message)
+      logger.error('persona-engine', `Erro na chave ${keyObj.id} (${keyInfo.type}): ${err.message}`)
+      
+      if (isRecoverable) {
+        markError(keyObj.id)
+        continue // Tenta a próxima
+      } else {
+        // Erro não recuperável (ex: prompt bloqueado), para por aqui ou tenta próxima?
+        // Geralmente melhor tentar a próxima se for erro de API
+        markError(keyObj.id)
+        continue
       }
     }
   }
 
-  // Fallback to Groq
-  if (!result) {
-    const groqKey = getKey('groq')
-    if (groqKey) {
-      try {
-        result = await callGroq(groqKey, systemInstruction, historyMsgs, userMessageContext)
-      } catch (err) {
-        logger.error('persona-engine', `Erro no Groq: ${err.message}`)
-        markError(groqKey.id)
-      }
-    }
-  }
-
-  // Static fallback — responde dentro do personagem da persona
   if (!result) {
     logger.error('persona-engine', 'Fallback estático. Nenhuma IA disponível.')
     const fallbackPhrase = persona.ban_phrase || persona.welcome_text || `...`

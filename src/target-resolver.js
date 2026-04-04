@@ -191,8 +191,10 @@ function getBestDisplayName(resolution, fallbackJid = '', groupJid = null) {
     const { resolveUser } = require('./identity')
     return resolveUser(fallbackJid || getPreferredMentionId(resolution) || getPreferredActionId(resolution), groupJid)
   } catch {
-    const raw = (fallbackJid || getPreferredMentionId(resolution) || '').split('@')[0]
-    return raw ? `[Oculto: ${raw}]` : 'Desconhecido'
+    const jid = fallbackJid || getPreferredMentionId(resolution) || getPreferredActionId(resolution) || ''
+    if (!jid || jid.endsWith('@lid')) return 'Usuário'
+    const num = jid.split('@')[0]
+    return num ? `+${num}` : 'Usuário'
   }
 }
 

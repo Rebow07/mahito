@@ -76,7 +76,7 @@ async function isAdmin(sock, groupJid, userJid) {
       logger.info('identity', `[Admin Check] Match (Sucesso) | Alias '${aliasBase}' encontrado no array de admins.`)
       return true
     }
-    // Compara por número contra os JIDs de admin (caso os admins venham como @s.whatsapp.net)
+    // Compara por número contra os JIDs de admin (caso os admins venham como @s.whatsapp.net ou @lid)
     const aliasNum = String(alias).replace(/\D/g, '').replace(/@.*$/, '')
     if (aliasNum.length >= 8) {
       const matchedByNum = adminJids.find(aJid => aJid.startsWith(aliasNum + '@') || aJid === aliasNum)
@@ -84,6 +84,24 @@ async function isAdmin(sock, groupJid, userJid) {
         logger.info('identity', `[Admin Check] Match por número (Sucesso) | ${aliasNum} → ${matchedByNum}`)
         return true
       }
+    }
+  }
+
+  // Cross-reference via cache de identidade:
+  // Se o sender tem LID conhecido, checar o LID contra adminJids
+  if (userIdentity.lid) {
+    const lidBase = getBaseJid(userIdentity.lid)
+    if (adminJids.includes(lidBase)) {
+      logger.info('identity', `[Admin Check] Match por LID (cross-ref) | ${lidBase} encontrado nos admins.`)
+      return true
+    }
+  }
+  // Se o sender tem número conhecido, checar o número contra admins que venham como JID phone
+  if (userIdentity.number) {
+    const phoneJid = `${userIdentity.number}@s.whatsapp.net`
+    if (adminJids.includes(phoneJid)) {
+      logger.info('identity', `[Admin Check] Match por JID phone (cross-ref) | ${phoneJid} encontrado nos admins.`)
+      return true
     }
   }
 

@@ -53,14 +53,16 @@ function safeSendMessage(_sock, jid, content, _opts, _delay, _priority) {
 // ─── Sticker Helpers ───
 
 async function sendMahitoSticker(sock, jid) {
-  if (!sock) {
-    logger.info('commands', 'sendMahitoSticker ignorado: sock indisponível (modo Evolution)')
-    return false
-  }
   const stickerPath = path.join(PATHS.STICKERS_DIR, 'mahito.webp')
   if (!fs.existsSync(stickerPath)) return false
   try {
-    await enqueueWA(`mahitoSticker:${jid}`, () => sock.sendMessage(jid, { sticker: fs.readFileSync(stickerPath) }), DELAYS.sticker)
+    if (sock) {
+      await enqueueWA(`mahitoSticker:${jid}`, () => sock.sendMessage(jid, { sticker: fs.readFileSync(stickerPath) }), DELAYS.sticker)
+    } else {
+      // Modo Evolution: envia sticker via Evolution API (base64)
+      const b64 = `data:image/webp;base64,${fs.readFileSync(stickerPath).toString('base64')}`
+      await transport.sendSticker(jid, b64)
+    }
     return true
   } catch (err) {
     logger.error('commands', `Erro ao enviar figurinha do Mahito: ${err.message || err}`)
@@ -69,37 +71,45 @@ async function sendMahitoSticker(sock, jid) {
 }
 
 async function sendStickerFromMessage(sock, targetJid, sourceMsg, quotedMsg) {
-  if (!sock) {
-    logger.warn('commands', 'sendStickerFromMessage ignorado: sock indisponível (modo Evolution) — downloadMediaMessage requer Baileys')
-    throw new Error('Stickers não disponíveis em modo Evolution')
-  }
   try {
-    // Debug log
-    const msgKeys = Object.keys(sourceMsg?.message || {})
-    logger.info('sticker', `Processando sticker. Message keys: ${JSON.stringify(msgKeys)}`)
+    let mediaBuffer = null
 
-    const media = await downloadMediaMessage(sourceMsg, 'buffer', {}, {
-      logger: P({ level: 'silent' }),
-      reuploadRequest: sock.updateMediaMessage
-    })
-
-    if (!media || !Buffer.isBuffer(media) || media.length === 0) {
-      throw new Error('downloadMediaMessage retornou buffer vazio ou inválido')
+    if (sock) {
+      // Modo Baileys
+      mediaBuffer = await downloadMediaMessage(sourceMsg, 'buffer', {}, {
+        logger: P({ level: 'silent' }),
+        reuploadRequest: sock.updateMediaMessage
+      })
+    } else {
+      // Modo Evolution
+      const evolution = require('./evolution')
+      const res = await evolution.getBase64FromMedia(sourceMsg.key)
+      if (res && res.base64) {
+        mediaBuffer = Buffer.from(res.base64, 'base64')
+      }
     }
 
-    const webp = await sharp(media)
+    if (!mediaBuffer || !Buffer.isBuffer(mediaBuffer) || mediaBuffer.length === 0) {
+      throw new Error('Falha ao obter mídia para o sticker (buffer vazio ou inválido)')
+    }
+
+    const webp = await sharp(mediaBuffer)
       .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
       .webp({ quality: 80 })
       .toBuffer()
 
-    await enqueueWA(
-      `sticker:${targetJid}`,
-      () => sock.sendMessage(targetJid, { sticker: webp }, quotedMsg ? { quoted: quotedMsg } : {}),
-      DELAYS.sticker
-    )
+    if (sock) {
+      await enqueueWA(
+        `sticker:${targetJid}`,
+        () => sock.sendMessage(targetJid, { sticker: webp }, quotedMsg ? { quoted: quotedMsg } : {}),
+        DELAYS.sticker
+      )
+    } else {
+      const b64 = `data:image/webp;base64,${webp.toString('base64')}`
+      await transport.sendSticker(targetJid, b64)
+    }
   } catch (err) {
     logger.error('sticker', `Erro ao gerar sticker: ${err.message}`)
-    logger.error('sticker', `Stack: ${err.stack}`)
     throw err
   }
 }
@@ -329,19 +339,27 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
                   msgObj?.message?.viewOnceMessage?.message?.imageMessage
 
   if (state.customerStates[jid]?.setProfilePhoto && isImage) {
-    if (!sock) {
-      await safeSendMessage(sock, jid, { text: '⚠️ Alteração de foto não disponível em modo Evolution.' })
-      delete state.customerStates[jid].setProfilePhoto
-      return
-    }
     try {
-      const buffer = await downloadMediaMessage(msgObj, 'buffer', {}, { logger: P({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage })
-      await enqueueWA('updateProfilePicture', () => sock.updateProfilePicture(sock.user.id, buffer), DELAYS.profile)
+      // Tenta obter URL da imagem do payload da Evolution API
+      const imgMsg = msgObj?.message?.imageMessage
+      const mediaUrl = imgMsg?.url || imgMsg?.directPath || ''
+      const evolution = require('./evolution')
+      if (mediaUrl) {
+        await evolution.updateProfilePicture(mediaUrl)
+      } else {
+        // Tenta obter base64 via Evolution API
+        const msgKey = msgObj?.key
+        if (msgKey) {
+          const b64 = await evolution.getBase64FromMedia(msgKey)
+          if (b64) await evolution.updateProfilePicture(b64)
+          else throw new Error('Não foi possível obter a imagem.')
+        }
+      }
       delete state.customerStates[jid].setProfilePhoto
       await safeSendMessage(sock, jid, { text: '✅ Foto do perfil atualizada.' })
     } catch (err) {
       delete state.customerStates[jid].setProfilePhoto
-      await safeSendMessage(sock, jid, { text: `❌ Erro: ${err.message}` })
+      await safeSendMessage(sock, jid, { text: `❌ Erro ao atualizar foto: ${err.message}` })
     }
     return
   }
@@ -545,18 +563,14 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       return
     }
     if (msg === '3') {
-      if (!sock) {
-        await safeSendMessage(sock, jid, { text: '⚠️ Listar grupos não disponível em modo Evolution (requer sock Baileys).' })
-        return
+      try {
+        const evolution = require('./evolution')
+        const groups = await evolution.fetchAllGroups(false)
+        const lines = (groups || []).slice(0, 30).map(g => `*${g.subject || g.name || 'Grupo'}*\nID: ${g.id}\n`)
+        await safeSendMessage(sock, jid, { text: lines.length ? `📊 *Meus Grupos (${groups.length})*\n\n${lines.join('\n')}` : 'Nenhum grupo encontrado.' })
+      } catch (err) {
+        await safeSendMessage(sock, jid, { text: `❌ Erro ao listar grupos: ${err.message}` })
       }
-      const chats = await sock.groupFetchAllParticipating()
-      const botJid = getBaseJid(sock.user.id)
-      const lines = []
-      for (const [gJid, meta] of Object.entries(chats)) {
-        const isAdmin = meta.participants?.some(p => getBaseJid(p.id) === botJid && !!p.admin)
-        lines.push(`*${meta.subject || 'Grupo'}*\nID: ${gJid}\nStatus: ${isAdmin ? 'Admin ✅' : 'Membro ❌'}\n`)
-      }
-      await safeSendMessage(sock, jid, { text: lines.length ? `📊 *Meus Grupos*\n\n${lines.join('\n')}` : 'Nenhum grupo encontrado.' })
       state.customerStates[jid].flow = 'owner_menu'
       await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
       return
@@ -634,12 +648,13 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       return
     }
     if (msg === '8') {
-       if (!sock) {
-         await safeSendMessage(sock, jid, { text: '⚠️ Sair do grupo não disponível em modo Evolution.' })
-         return
-       }
        await safeSendMessage(sock, jid, { text: '👋 Saindo do grupo...' })
-       await safeRemove(sock, targetJid, getBaseJid(sock.user.id))
+       try {
+         const evolution = require('./evolution')
+         await evolution.leaveGroup(targetJid)
+       } catch (err) {
+         logger.error('commands', `Erro ao sair do grupo ${targetJid}: ${err.message}`)
+       }
        state.customerStates[jid].flow = 'owner_menu'
        await safeSendMessage(sock, jid, { text: ownerPrivateMenu() })
        return
@@ -671,14 +686,12 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       return
     }
     if (msg === '15') {
-       if (!sock) {
-         await safeSendMessage(sock, jid, { text: '⚠️ Fechar/abrir grupo não disponível em modo Evolution.' })
-         return
-       }
        try {
+         const evolution = require('./evolution')
          const meta = await getGroupMeta(sock, targetJid)
          const isAnnounce = meta?.announce
-         await sock.groupSettingUpdate(targetJid, isAnnounce ? 'not_announcement' : 'announcement')
+         const action = isAnnounce ? 'not_announcement' : 'announcement'
+         await evolution.updateGroupSetting(targetJid, action)
          await safeSendMessage(sock, jid, { text: `✅ Grupo ${isAnnounce ? 'ABERTO' : 'FECHADO'} para membros.` })
        } catch (err) {
          await safeSendMessage(sock, jid, { text: `❌ Erro: O bot precisa ser Admin do grupo.` })
@@ -1348,17 +1361,20 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
   if (sc.flow === 'comunicado_text' && msg !== '0' && msg !== 'cancelar') {
     state.customerStates[jid].comunicadoText = msgObj?.message?.conversation || msgObj?.message?.extendedTextMessage?.text || raw
     state.customerStates[jid].flow = 'comunicado_group'
-    
-    const chats = sock ? await sock.groupFetchAllParticipating() : {}
     const options = []
     state.customerStates[jid].comunicadoGroups = []
-    let i = 1
-    for (const [gJid, meta] of Object.entries(chats)) {
-      options.push(`${i}. ${meta.subject || 'Grupo'}`)
-      state.customerStates[jid].comunicadoGroups.push(gJid)
-      i++
+    try {
+      const evolution = require('./evolution')
+      const groups = await evolution.fetchAllGroups(false)
+      let i = 1
+      for (const g of (groups || [])) {
+        options.push(`${i}. ${g.subject || g.name || 'Grupo'}`)
+        state.customerStates[jid].comunicadoGroups.push(g.id)
+        i++
+      }
+    } catch (err) {
+      logger.error('commands', `comunicado_text: erro ao listar grupos: ${err.message}`)
     }
-    
     await safeSendMessage(sock, jid, { text: `📋 Escolha o grupo pelo número (digite 0 para cancelar):\n\n${options.join('\n')}` })
     return
   }
@@ -1495,8 +1511,9 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
   try {
     const parts = text.trim().split(' ')
     const cmd = parts[0] ? parts[0].toLowerCase() : ''
-    if (!cmd) return false
+    if (!cmd || !cmd.startsWith('!')) return false
 
+    logger.info('commands', `🔍 Comando reconhecido: ${cmd} | Executor: ${userJid} | Grupo: ${groupJid}`)
     const config = loadConfig()
 
     // ─── Metadata do grupo: lazy — busca uma vez, reutilizada por todos os comandos ───
@@ -1627,7 +1644,32 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
         `• !regras — Regras do grupo\n` +
         `• !status — Status do bot\n` +
         `• !ping — Pong!\n` +
-        `• !idgrupo — ID do grupo`
+        `• !idgrupo — ID do grupo\n\n` +
+        `🏘️ *Gestão de Grupo (Admins)*\n` +
+        `• !nome <nome> — Renomear grupo\n` +
+        `• !desc <texto> — Alterar descrição\n` +
+        `• !foto <url> — Alterar foto do grupo\n` +
+        `• !efemero <0|1d|7d|90d> — Msgs temporárias\n` +
+        `• !link — Ver link de convite\n` +
+        `• !revogar — Revogar link de convite\n` +
+        `• !travar — Travar edição do grupo\n` +
+        `• !destravar — Destravar edição do grupo\n` +
+        `• !fechar — Fechar grupo (só admins enviam)\n` +
+        `• !abrir — Abrir grupo para todos\n` +
+        `• !add @num — Adicionar membro\n` +
+        `• !admin @user — Promover a admin\n` +
+        `• !deadmin @user — Rebaixar admin\n` +
+        `• !infogrupo — Info detalhada do grupo\n` +
+        `• !admins — Listar admins\n` +
+        `• !membros — Listar membros\n\n` +
+        `🌐 *Bot Global (Dono)*\n` +
+        `• !entrar <link> — Entrar em grupo\n` +
+        `• !sair — Sair do grupo atual\n` +
+        `• !grupos — Listar todos os grupos\n` +
+        `• !criargrupo <nome> | <nums> — Criar grupo\n` +
+        `• !enquete <título> | <op1> | <op2> — Enquete\n` +
+        `• !localizar <lat> <lng> [nome] — Localização\n` +
+        `• !verificar <num> — Checar WhatsApp`
       })
       return true
     }
@@ -2056,26 +2098,46 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     return true
   }
 
-  // ─── !s / !sticker / !figurinha ───
+   // ─── !s / !sticker / !figurinha ───
   if (cmd === '!s' || cmd === '!sticker' || cmd === '!figurinha') {
+    // Em modo Evolution, sticker de imagem requer download via Baileys
+    // Tenta via Evolution API (getBase64FromMedia) e converte para webp
     try {
       const ctx = msg.message?.extendedTextMessage?.contextInfo
       const quoted = ctx?.quotedMessage
-
-      // Verifica se a própria mensagem contém imagem (em qualquer wrapper)
       const hasImage = msg.message?.imageMessage
         || msg.message?.ephemeralMessage?.message?.imageMessage
         || msg.message?.viewOnceMessageV2?.message?.imageMessage
         || msg.message?.viewOnceMessage?.message?.imageMessage
-
+      if (!hasImage && !quoted?.imageMessage) {
+        await safeSendMessage(sock, groupJid, { text: '❌ Use !figurinha marcando uma imagem, ou envie com a imagem.' })
+        return true
+      }
+      if (!sock) {
+        // Modo Evolution: tenta obter base64 da imagem via Evolution API
+        try {
+          const evolution = require('./evolution')
+          const msgKey = hasImage ? msg.key : { ...msg.key, id: ctx?.stanzaId || msg.key.id }
+          const b64 = await evolution.getBase64FromMedia(msgKey)
+          if (!b64) throw new Error('Não foi possível obter a imagem.')
+          // Converte base64 para webp usando sharp
+          const imgBuffer = Buffer.from(b64.replace(/^data:[^;]+;base64,/, ''), 'base64')
+          const webp = await sharp(imgBuffer)
+            .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+            .webp({ quality: 80 })
+            .toBuffer()
+          const base64Webp = `data:image/webp;base64,${webp.toString('base64')}`
+          await transport.sendSticker(groupJid, base64Webp)
+        } catch (evoErr) {
+          logger.warn('commands', `Sticker Evolution: ${evoErr.message}`)
+          await safeSendMessage(sock, groupJid, { text: '❌ Não foi possível criar a figurinha neste modo.' })
+        }
+        return true
+      }
       if (hasImage) {
-        // Passa o msg ORIGINAL inteiro — downloadMediaMessage sabe desencapsular
         await sendStickerFromMessage(sock, groupJid, msg, msg)
       } else if (quoted?.imageMessage) {
-        // Para quoted, monta a estrutura que o Baileys espera
         await sendStickerFromMessage(sock, groupJid, { key: msg.key, message: quoted }, msg)
-      } else {
-        await safeSendMessage(sock, groupJid, { text: '❌ Use !figurinha marcando uma imagem, ou envie com a imagem.' })
       }
     } catch (err) {
       await safeSendMessage(sock, groupJid, { text: '❌ Erro ao criar figurinha. Certifique-se de que é uma imagem válida.' })
@@ -2192,6 +2254,277 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     await safeSendMessage(sock, groupJid, {
       text: `👻 *Inativos há ${days}+ dias* (${inactive.length} total)\n\n${lines.join('\n')}`,
       mentions
+    })
+    return true
+  }
+
+  // ─── !add @user — Adicionar membro ao grupo ───
+  if (cmd === '!add') {
+    if (!admin && !isBotOwner) { await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins podem adicionar membros.' }); return true }
+    const targets = await resolveTargets('group_action')
+    if (!targets.length) { await safeSendMessage(sock, groupJid, { text: 'Informe o número. Ex: !add @5517999999999' }); return true }
+    for (const resolution of targets) {
+      const jid = getPreferredActionId(resolution)
+      const displayName = getBestDisplayName(resolution, jid, groupJid)
+      try {
+        const { safeAdd } = require('./queue')
+        await safeAdd(sock, groupJid, jid)
+        await safeSendMessage(sock, groupJid, { text: `✅ Convite enviado para ${displayName}.` })
+      } catch (err) {
+        await safeSendMessage(sock, groupJid, { text: `❌ Não foi possível adicionar ${displayName}: ${err.message}` })
+      }
+    }
+    return true
+  }
+
+  // ─── !admin @user — Promover a admin ───
+  if (cmd === '!admin' || cmd === '!promoveradmin') {
+    if (!admin && !isBotOwner) { await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins podem promover.' }); return true }
+    const targets = await resolveTargets('group_action')
+    if (!targets.length) { await safeSendMessage(sock, groupJid, { text: 'Marque alguém. Ex: !admin @user' }); return true }
+    for (const resolution of targets) {
+      const jid = getPreferredActionId(resolution)
+      const displayName = getBestDisplayName(resolution, jid, groupJid)
+      await safePromote(sock, groupJid, jid)
+      await safeSendMessage(sock, groupJid, { text: `⬆️ ${displayName} agora é administrador.`, mentions: [getPreferredMentionId(resolution) || jid] })
+    }
+    return true
+  }
+
+  // ─── !deadmin @user — Rebaixar admin ───
+  if (cmd === '!deadmin' || cmd === '!rebaixaradmin') {
+    if (!admin && !isBotOwner) { await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins podem rebaixar.' }); return true }
+    const targets = await resolveTargets('group_action')
+    if (!targets.length) { await safeSendMessage(sock, groupJid, { text: 'Marque alguém. Ex: !deadmin @user' }); return true }
+    for (const resolution of targets) {
+      const jid = getPreferredActionId(resolution)
+      const displayName = getBestDisplayName(resolution, jid, groupJid)
+      await safeDemote(sock, groupJid, jid)
+      await safeSendMessage(sock, groupJid, { text: `⬇️ ${displayName} foi rebaixado.`, mentions: [getPreferredMentionId(resolution) || jid] })
+    }
+    return true
+  }
+
+  // ─── !nome <novo nome> — Renomear grupo ───
+  if (cmd === '!nome') {
+    if (!admin && !isBotOwner) { await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins podem renomear o grupo.' }); return true }
+    const newName = parts.slice(1).join(' ').trim()
+    if (!newName) { await safeSendMessage(sock, groupJid, { text: 'Informe o novo nome. Ex: !nome Meu Grupo' }); return true }
+    const evolution = require('./evolution')
+    const ok = await evolution.updateGroupSubject(groupJid, newName)
+    if (ok) await safeSendMessage(sock, groupJid, { text: `✅ Nome do grupo alterado para: *${newName}*` })
+    else await safeSendMessage(sock, groupJid, { text: '❌ Falha ao renomear o grupo. Verifique se o bot é admin.' })
+    return true
+  }
+
+  // ─── !desc <descrição> — Alterar descrição do grupo ───
+  if (cmd === '!desc' || cmd === '!descricao') {
+    if (!admin && !isBotOwner) { await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins podem alterar a descrição.' }); return true }
+    const newDesc = parts.slice(1).join(' ').trim()
+    if (!newDesc) { await safeSendMessage(sock, groupJid, { text: 'Informe a nova descrição. Ex: !desc Grupo oficial do servidor' }); return true }
+    const evolution = require('./evolution')
+    const ok = await evolution.updateGroupDescription(groupJid, newDesc)
+    if (ok) await safeSendMessage(sock, groupJid, { text: '✅ Descrição do grupo atualizada.' })
+    else await safeSendMessage(sock, groupJid, { text: '❌ Falha ao alterar a descrição. Verifique se o bot é admin.' })
+    return true
+  }
+
+  // ─── !foto <url> — Alterar foto do grupo ───
+  if (cmd === '!foto') {
+    if (!admin && !isBotOwner) { await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins podem alterar a foto do grupo.' }); return true }
+    const imageUrl = parts[1] || ''
+    if (!imageUrl.startsWith('http')) { await safeSendMessage(sock, groupJid, { text: 'Informe a URL da imagem. Ex: !foto https://exemplo.com/foto.jpg' }); return true }
+    const evolution = require('./evolution')
+    const ok = await evolution.updateGroupPicture(groupJid, imageUrl)
+    if (ok) await safeSendMessage(sock, groupJid, { text: '✅ Foto do grupo atualizada.' })
+    else await safeSendMessage(sock, groupJid, { text: '❌ Falha ao alterar a foto. Verifique se o bot é admin.' })
+    return true
+  }
+
+  // ─── !efemero <0|1d|7d|90d> — Mensagens temporárias ───
+  if (cmd === '!efemero' || cmd === '!temporizador' || cmd === '!ephemeral') {
+    if (!admin && !isBotOwner) { await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins podem configurar mensagens temporárias.' }); return true }
+    const arg = (parts[1] || '0').toLowerCase()
+    const map = { '0': 0, 'off': 0, '1d': 86400, '1dia': 86400, '7d': 604800, '7dias': 604800, '90d': 7776000, '90dias': 7776000 }
+    const expiration = map[arg] !== undefined ? map[arg] : 0
+    const evolution = require('./evolution')
+    const ok = await evolution.toggleEphemeral(groupJid, expiration)
+    const label = expiration === 0 ? 'desativadas' : (expiration === 86400 ? '1 dia' : expiration === 604800 ? '7 dias' : '90 dias')
+    if (ok) await safeSendMessage(sock, groupJid, { text: `⏳ Mensagens temporárias: *${label}*` })
+    else await safeSendMessage(sock, groupJid, { text: '❌ Falha ao configurar mensagens temporárias.' })
+    return true
+  }
+
+  // ─── !link — Obter link de convite ───
+  if (cmd === '!link') {
+    if (!admin && !isBotOwner) { await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins podem ver o link de convite.' }); return true }
+    const evolution = require('./evolution')
+    const code = await evolution.getGroupInviteCode(groupJid)
+    if (code) await safeSendMessage(sock, groupJid, { text: `🔗 *Link de convite:*\nhttps://chat.whatsapp.com/${code}` })
+    else await safeSendMessage(sock, groupJid, { text: '❌ Não foi possível obter o link.' })
+    return true
+  }
+
+  // ─── !revogar — Revogar link de convite ───
+  if (cmd === '!revogar' || cmd === '!revogarlink') {
+    if (!admin && !isBotOwner) { await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins podem revogar o link.' }); return true }
+    const evolution = require('./evolution')
+    const newCode = await evolution.revokeGroupInviteCode(groupJid)
+    if (newCode) await safeSendMessage(sock, groupJid, { text: `✅ Link revogado. Novo link:\nhttps://chat.whatsapp.com/${newCode}` })
+    else await safeSendMessage(sock, groupJid, { text: '❌ Falha ao revogar o link.' })
+    return true
+  }
+
+  // ─── !entrar <link> — Entrar em grupo pelo link ───
+  if (cmd === '!entrar' || cmd === '!join') {
+    if (!isBotOwner) { await safeSendMessage(sock, groupJid, { text: '❌ Apenas o dono do bot pode usar este comando.' }); return true }
+    const inviteUrl = parts[1] || ''
+    if (!inviteUrl.includes('chat.whatsapp.com') && inviteUrl.length < 10) {
+      await safeSendMessage(sock, groupJid, { text: 'Informe o link. Ex: !entrar https://chat.whatsapp.com/CODIGO' })
+      return true
+    }
+    const evolution = require('./evolution')
+    const result = await evolution.joinGroupByInviteCode(inviteUrl)
+    if (result) await safeSendMessage(sock, groupJid, { text: '✅ Entrei no grupo com sucesso!' })
+    else await safeSendMessage(sock, groupJid, { text: '❌ Falha ao entrar no grupo. Link inválido ou expirado.' })
+    return true
+  }
+
+  // ─── !sair — Sair do grupo atual ───
+  if (cmd === '!sair') {
+    if (!isBotOwner) { await safeSendMessage(sock, groupJid, { text: '❌ Apenas o dono do bot pode usar este comando.' }); return true }
+    await safeSendMessage(sock, groupJid, { text: '👋 Saindo do grupo...' })
+    const evolution = require('./evolution')
+    await evolution.leaveGroup(groupJid)
+    return true
+  }
+
+  // ─── !grupos — Listar todos os grupos ───
+  if (cmd === '!grupos') {
+    if (!isBotOwner) { await safeSendMessage(sock, groupJid, { text: '❌ Apenas o dono do bot pode usar este comando.' }); return true }
+    const evolution = require('./evolution')
+    const groups = await evolution.fetchAllGroups(false)
+    if (!groups || !groups.length) { await safeSendMessage(sock, groupJid, { text: '📋 Nenhum grupo encontrado.' }); return true }
+    const lines = groups.slice(0, 30).map((g, i) => `${i + 1}. *${g.subject || g.name || 'Sem nome'}*\n   ID: ${g.id}`)
+    await safeSendMessage(sock, groupJid, { text: `📋 *Grupos (${groups.length}):*\n\n${lines.join('\n\n')}` })
+    return true
+  }
+
+  // ─── !criargrupo <nome> | <num1> <num2> ... — Criar grupo ───
+  if (cmd === '!criargrupo') {
+    if (!isBotOwner) { await safeSendMessage(sock, groupJid, { text: '❌ Apenas o dono do bot pode criar grupos.' }); return true }
+    const rawArgs = parts.slice(1).join(' ')
+    const [groupName, ...numsPart] = rawArgs.split('|').map(s => s.trim())
+    if (!groupName) { await safeSendMessage(sock, groupJid, { text: 'Use: !criargrupo Nome do Grupo | 5511999999999 5517888888888' }); return true }
+    const nums = (numsPart.join(' ') || '').split(/\s+/).filter(n => /^\d{8,}$/.test(n))
+    const evolution = require('./evolution')
+    const result = await evolution.createGroup(groupName, nums)
+    if (result?.id) await safeSendMessage(sock, groupJid, { text: `✅ Grupo *${groupName}* criado!\nID: ${result.id}` })
+    else await safeSendMessage(sock, groupJid, { text: '❌ Falha ao criar grupo.' })
+    return true
+  }
+
+  // ─── !enquete <titulo> | <op1> | <op2> ... — Criar enquete ───
+  if (cmd === '!enquete' || cmd === '!poll') {
+    const rawArgs = parts.slice(1).join(' ')
+    const options = rawArgs.split('|').map(s => s.trim()).filter(Boolean)
+    if (options.length < 3) { await safeSendMessage(sock, groupJid, { text: 'Use: !enquete Título | Opção 1 | Opção 2 | Opção 3' }); return true }
+    const [title, ...pollOptions] = options
+    const evolution = require('./evolution')
+    const result = await evolution.sendPoll(groupJid, title, pollOptions)
+    if (!result) await safeSendMessage(sock, groupJid, { text: '❌ Falha ao criar enquete.' })
+    return true
+  }
+
+  // ─── !localizar <lat> <lng> [nome] — Enviar localização ───
+  if (cmd === '!localizar' || cmd === '!local') {
+    if (!isPrivileged) { await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins podem usar este comando.' }); return true }
+    const lat = parseFloat(parts[1])
+    const lng = parseFloat(parts[2])
+    const name = parts.slice(3).join(' ') || 'Localização'
+    if (isNaN(lat) || isNaN(lng)) { await safeSendMessage(sock, groupJid, { text: 'Use: !localizar -23.5505 -46.6333 São Paulo' }); return true }
+    const evolution = require('./evolution')
+    await evolution.sendLocation(groupJid, lat, lng, name)
+    return true
+  }
+
+  // ─── !verificar <numero> — Verificar se número tem WhatsApp ───
+  if (cmd === '!verificar' || cmd === '!checar') {
+    if (!isPrivileged) { await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins podem usar este comando.' }); return true }
+    const num = (parts[1] || '').replace(/\D/g, '')
+    if (!num || num.length < 8) { await safeSendMessage(sock, groupJid, { text: 'Informe o número. Ex: !verificar 5517999999999' }); return true }
+    const evolution = require('./evolution')
+    const result = await evolution.checkWhatsApp([num])
+    const found = Array.isArray(result) ? result[0] : result
+    if (found?.exists || found?.jid) await safeSendMessage(sock, groupJid, { text: `✅ O número ${num} *tem* WhatsApp.` })
+    else await safeSendMessage(sock, groupJid, { text: `❌ O número ${num} *não tem* WhatsApp.` })
+    return true
+  }
+
+  // ─── !travar — Travar grupo (só admins editam info) ───
+  if (cmd === '!travar') {
+    if (!admin && !isBotOwner) { await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins podem travar o grupo.' }); return true }
+    const evolution = require('./evolution')
+    await evolution.updateGroupSetting(groupJid, 'locked')
+    await safeSendMessage(sock, groupJid, { text: '🔒 Grupo travado. Apenas admins podem editar as informações.' })
+    return true
+  }
+
+  // ─── !destravar — Destravar grupo ───
+  if (cmd === '!destravar') {
+    if (!admin && !isBotOwner) { await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins podem destravar o grupo.' }); return true }
+    const evolution = require('./evolution')
+    await evolution.updateGroupSetting(groupJid, 'unlocked')
+    await safeSendMessage(sock, groupJid, { text: '🔓 Grupo destravado. Todos os membros podem editar as informações.' })
+    return true
+  }
+
+  // ─── !infogrupo — Informações detalhadas do grupo ───
+  if (cmd === '!infogrupo' || cmd === '!info') {
+    const meta = await getGroupMetaLazy()
+    if (!meta) { await safeSendMessage(sock, groupJid, { text: '❌ Não foi possível obter informações do grupo.' }); return true }
+    const participants = meta.participants || []
+    const admins = participants.filter(p => !!p.admin)
+    const members = participants.filter(p => !p.admin)
+    const createdAt = meta.creation ? new Date(meta.creation * 1000).toLocaleDateString('pt-BR') : 'Desconhecido'
+    await safeSendMessage(sock, groupJid, {
+      text:
+        `📋 *Informações do Grupo*\n\n` +
+        `📌 *Nome:* ${meta.subject || 'Sem nome'}\n` +
+        `🆔 *ID:* ${groupJid}\n` +
+        `📅 *Criado em:* ${createdAt}\n` +
+        `👥 *Membros:* ${participants.length}\n` +
+        `🛡️ *Admins:* ${admins.length}\n` +
+        `👤 *Membros comuns:* ${members.length}\n` +
+        `📝 *Descrição:* ${meta.desc || 'Sem descrição'}`
+    })
+    return true
+  }
+
+  // ─── !admins — Listar admins do grupo ───
+  if (cmd === '!admins') {
+    const meta = await getGroupMetaLazy()
+    if (!meta) { await safeSendMessage(sock, groupJid, { text: '❌ Não foi possível obter a lista de admins.' }); return true }
+    const admins = (meta.participants || []).filter(p => !!p.admin)
+    if (!admins.length) { await safeSendMessage(sock, groupJid, { text: '📋 Nenhum admin encontrado.' }); return true }
+    const lines = admins.map(p => `• ${resolveUser(getBaseJid(p.id), groupJid)}`)
+    const mentions = admins.map(p => getBaseJid(p.id))
+    await safeSendMessage(sock, groupJid, {
+      text: `🛡️ *Admins do grupo (${admins.length}):*\n\n${lines.join('\n')}`,
+      mentions
+    })
+    return true
+  }
+
+  // ─── !membros — Listar membros do grupo ───
+  if (cmd === '!membros') {
+    if (!isPrivileged) { await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins podem listar membros.' }); return true }
+    const meta = await getGroupMetaLazy()
+    if (!meta) { await safeSendMessage(sock, groupJid, { text: '❌ Não foi possível obter a lista de membros.' }); return true }
+    const participants = meta.participants || []
+    const lines = participants.slice(0, 50).map(p => `• ${resolveUser(getBaseJid(p.id), groupJid)}${p.admin ? ' 🛡️' : ''}`)
+    await safeSendMessage(sock, groupJid, {
+      text: `👥 *Membros do grupo (${participants.length}):*\n\n${lines.join('\n')}${participants.length > 50 ? `\n... e mais ${participants.length - 50}` : ''}`
     })
     return true
   }

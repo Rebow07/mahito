@@ -196,32 +196,39 @@ async function processIncomingMessage(msg, sock, evType) {
     logger.error('pipeline', `Activity tracking: ${trackErr.message}`)
   }
 
-  // Anti-NSFW Check (precisa de sock para download de mídia e delete)
-  if (!sock) {
+  // Anti-NSFW Check
+  try {
+    const groupConfig = getGroupConfig(remoteJid)
     const imageMsg = msg.message?.imageMessage || msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage
-    if (imageMsg) logger.info('pipeline', '⚠️ Anti-NSFW ignorado: sock indisponível (modo Evolution) — download de mídia requer Baileys')
-  } else if (sock) {
-    try {
-      const groupConfig = getGroupConfig(remoteJid)
-      const imageMsg = msg.message?.imageMessage || msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage
-      if (groupConfig && groupConfig.anti_nsfw_enabled && imageMsg) {
-        const permLevel = getPermLevel(senderJid, remoteJid)
-        if (permLevel === 0) {
+    if (groupConfig && groupConfig.anti_nsfw_enabled && imageMsg) {
+      const permLevel = getPermLevel(senderJid, remoteJid)
+      if (permLevel === 0) {
+        let buffer = null
+        if (sock) {
           const P = require('pino')
           const { downloadMediaMessage } = require('@whiskeysockets/baileys')
-          const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger: P({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage })
-          const { checkNSFW } = require('./nsfw')
-          const result = await checkNSFW(buffer)
-          if (result.match) {
-            logger.warn('pipeline', `[NSFW] Imagem bloqueada de ${senderJid} no grupo ${remoteJid} (${result.similarity}% - ${result.matchedFile})`)
-            try { await sock.sendMessage(remoteJid, { delete: msg.key }) } catch {}
-            const { addStrikeDB } = require('./db')
+          buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger: P({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage })
+        } else {
+          const evolution = require('./evolution')
+          const res = await evolution.getBase64FromMedia(msg.key)
+          if (res && res.base64) buffer = Buffer.from(res.base64, 'base64')
+        }
+
+        if (buffer) {
+          const { analyzeNSFW } = require('./nsfw')
+          const result = await analyzeNSFW(buffer, imageMsg.mimetype || 'image/jpeg')
+          if (result.recommended_action === 'block') {
+            logger.warn('pipeline', `[NSFW] Imagem bloqueada de ${senderJid} no grupo ${remoteJid} (${result.category} - conf: ${result.confidence})`)
+            
+            const { safeDelete, safeRemove } = require('./queue')
+            await safeDelete(sock, remoteJid, msg.key, senderJid)
+            
+            const { addStrikeDB, resetStrikesDB } = require('./db')
             const { sendStrikeWarning } = require('./moderation')
             const count = addStrikeDB(senderJid, remoteJid)
             await sendStrikeWarning(sock, remoteJid, senderJid, count, groupConfig.max_penalties, 'conteúdo proibido (NSFW)')
+            
             if (count >= groupConfig.max_penalties) {
-              const { safeRemove } = require('./queue')
-              const { resetStrikesDB } = require('./db')
               await safeRemove(sock, remoteJid, senderJid)
               resetStrikesDB(senderJid, remoteJid)
             }
@@ -229,40 +236,34 @@ async function processIncomingMessage(msg, sock, evType) {
           }
         }
       }
-    } catch (nsfwErr) {
-      logger.error('pipeline', `Anti-NSFW: ${nsfwErr.message}`)
     }
+  } catch (nsfwErr) {
+    logger.error('pipeline', `Anti-NSFW: ${nsfwErr.message}`)
   }
 
   if (!text) return
 
-  // Slow Mode Check (precisa de sock para delete)
-  if (!sock) {
+  // Slow Mode Check
+  try {
     const groupConfig = getGroupConfig(remoteJid)
     if (groupConfig && groupConfig.slow_mode_seconds > 0) {
-      logger.info('pipeline', `⚠️ Slow mode ignorado em ${remoteJid}: sock indisponível (modo Evolution)`)
-    }
-  } else if (sock) {
-    try {
-      const groupConfig = getGroupConfig(remoteJid)
-      if (groupConfig && groupConfig.slow_mode_seconds > 0) {
-        const permLevel = getPermLevel(senderJid, remoteJid)
-        const admin = await isAdmin(sock, remoteJid, senderJid)
-        if (permLevel === 0 && !admin && !isOwner(senderJid, currentConfig)) {  // isOwner retorna 'master'/'secondary'/false
-          const key = `slow:${senderJid}:${remoteJid}`
-          const lastSent = state.slowModeTracker?.get(key) || 0
-          const now = Date.now()
-          if (now - lastSent < groupConfig.slow_mode_seconds * 1000) {
-            try { await sock.sendMessage(remoteJid, { delete: msg.key }) } catch {}
-            return
-          }
-          if (!state.slowModeTracker) state.slowModeTracker = new Map()
-          state.slowModeTracker.set(key, now)
+      const permLevel = getPermLevel(senderJid, remoteJid)
+      const admin = await isAdmin(sock, remoteJid, senderJid)
+      if (permLevel === 0 && !admin && !isOwner(senderJid, currentConfig)) {
+        const key = `slow:${senderJid}:${remoteJid}`
+        const lastSent = state.slowModeTracker?.get(key) || 0
+        const now = Date.now()
+        if (now - lastSent < groupConfig.slow_mode_seconds * 1000) {
+          const { safeDelete } = require('./queue')
+          await safeDelete(sock, remoteJid, msg.key, senderJid)
+          return
         }
+        if (!state.slowModeTracker) state.slowModeTracker = new Map()
+        state.slowModeTracker.set(key, now)
       }
-    } catch (slowErr) {
-      logger.error('pipeline', `Slow mode: ${slowErr.message}`)
     }
+  } catch (slowErr) {
+    logger.error('pipeline', `Slow mode: ${slowErr.message}`)
   }
 
   // ─── XP System ───

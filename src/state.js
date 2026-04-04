@@ -28,7 +28,8 @@ const state = {
   scheduledJobs: new Map(),
   groupMetaCache: new Map(),
   waQueue: [],
-  waQueueRunning: false
+  waQueueRunning: false,
+  instanceToken: null  // Token específico da instância Evolution (diferente da API key global)
 }
 
 const DELAYS = {

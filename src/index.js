@@ -209,6 +209,42 @@ async function startEvolutionMode() {
   logger.info('index', '=== Iniciando Mahito Bot (Evolution API — sem Baileys) ===')
   logger.info('index', '📡 Modo webhook-only: Baileys desativado, recebendo via POST /webhook/evolution')
 
+  // ─── Healthcheck Real ───
+  const evolution = require('./evolution')
+  logger.info('index', '🔍 Validando conectividade com a Evolution API...')
+  
+  try {
+    const connState = await evolution.getConnectionState()
+    if (!connState || (connState.instance?.state !== 'open' && connState.state !== 'open')) {
+      const reason = connState?.instance?.state || connState?.state || 'desconectada'
+      logger.error('index', `❌ Falha no Healthcheck: Instância está em estado "${reason}".`)
+      logger.warn('index', '⚠️ O bot NÃO será marcado como pronto. Verifique a instância na Evolution API.')
+      // Inicializa o dashboard mesmo assim para permitir debug/webhook, mas botReady continua false
+      try { const { startDashboard } = require('./dashboard'); startDashboard(null) } catch (err) { logger.error('index', `[DASHBOARD] Erro: ${err.message}`) }
+      return
+    }
+    logger.info('index', '✅ Conectividade validada com sucesso!')
+  } catch (err) {
+    logger.error('index', `❌ Erro crítico ao validar Evolution API: ${err.message}`)
+    try { const { startDashboard } = require('./dashboard'); startDashboard(null) } catch (err) { logger.error('index', `[DASHBOARD] Erro: ${err.message}`) }
+    return
+  }
+
+  // ─── Carrega token da instância para validação de webhook ───
+  // Evolution 2.x usa um token por instância (diferente da API key global).
+  // Esse token é enviado no campo `apikey` do payload do webhook.
+  try {
+    const instanceToken = await evolution.fetchInstanceToken()
+    if (instanceToken) {
+      state.instanceToken = instanceToken
+      logger.info('index', '🔑 Token de instância carregado para validação de webhook.')
+    } else {
+      logger.warn('index', '⚠️ Token de instância não encontrado — webhook validará apenas contra EVOLUTION_WEBHOOK_SECRET.')
+    }
+  } catch (e) {
+    logger.warn('index', `⚠️ Falha ao carregar token de instância: ${e.message}`)
+  }
+
   state.botReady = true
   transport.init(null) // Sem socket Baileys — transport usa Evolution API
 
