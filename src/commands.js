@@ -24,6 +24,7 @@ const { safeDelete, safeRemove, safePromote, safeDemote, safeUpdateGroupSetting,
 const transport = require('./transport/whatsapp')
 const { getGroupName, getGroupMeta, isAdmin } = require('./group')
 const { resolveUser, resolveGroup } = require('./identity')
+const { resolveTargetIdentity, getPreferredIds } = require('./target-resolver')
 const { sendStrikeWarning } = require('./moderation')
 const { enviarReacaoMahito } = require('./reactions')
 const { formatAchievementList, TOTAL_ACHIEVEMENTS } = require('./achievements')
@@ -103,16 +104,12 @@ async function sendStickerFromMessage(sock, targetJid, sourceMsg, quotedMsg) {
   }
 }
 
-// ─── Helper de extração de alvos (Evolution-safe) ──────────────────────────────────────
+// ─── Extração de alvos: centralizada em src/target-resolver.js ───────────────
+// Todos os comandos usam resolveTargetIdentity() importado acima.
 
 /**
- * Extrai a lista de alvos (JIDs) de um comando de moderação.
- * Funciona tanto em modo Baileys quanto em modo Evolution (webhook).
- *
- * Fontes verificadas em ordem:
- *  1. contextInfo.mentionedJid (marcação nativa via @)
- *  2. contextInfo.participant  (reply/quote de mensagem)
- *  3. Texto: @<dígitos> extraído com regex do texto bruto do comando
+ * @deprecated Use resolveTargetIdentity() de src/target-resolver.js
+ * Mantida apenas como shim para código legado fora desta função.
  *
  * @param {object} msg     Objeto de mensagem no formato pipeline
  * @param {string} text    Texto da mensagem (j\u00e1 extraído)
@@ -1501,7 +1498,19 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     if (!cmd) return false
 
     const config = loadConfig()
-    
+
+    // ─── Metadata do grupo: lazy — busca uma vez, reutilizada por todos os comandos ───
+    let _groupMeta = null
+    const getGroupMetaLazy = async () => {
+      if (!_groupMeta) _groupMeta = await getGroupMeta(sock, groupJid)
+      return _groupMeta
+    }
+    // Alias curto para resolveTargetIdentity com contexto preenchido
+    const resolveTargets = async (context) => {
+      const meta = await getGroupMetaLazy()
+      return resolveTargetIdentity({ msg, text, groupMetadata: meta, context, cmd })
+    }
+
     // ─── !fadm / !fechar ───
     if (cmd === '!fadm' || cmd === '!fechar') {
       logger.info('commands', `[!] !fechar acionado | Executor: ${userJid} | Grupo: ${groupJid}`)
@@ -1678,14 +1687,15 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
       await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins do grupo podem promover.' })
       return true
     }
-    const mentioned = extractTargets(msg, text)
+    const targets = await resolveTargets('group_action')
     const level = Math.min(3, Math.max(0, Number(parts[parts.length - 1]) || 1))
-    if (!mentioned.length) {
+    if (!targets.length) {
       await safeSendMessage(sock, groupJid, { text: 'Marque alguém. Ex: !promover @user 2' })
       return true
     }
     const levelNames = { 0: 'Membro', 1: 'VIP', 2: 'Mod', 3: 'Dono' }
-    for (const jid of mentioned) {
+    for (const resolution of targets) {
+      const jid = resolution.preferredId
       logger.info('commands', `[!] Processando promoção | Alvo: ${jid} | Nível: ${level}`)
       setPermLevel(jid, groupJid, level)
       if (level >= 1) {
@@ -1708,8 +1718,9 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
       await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins do grupo podem rebaixar.' })
       return true
     }
-    const mentioned = extractTargets(msg, text)
-    for (const jid of mentioned) {
+    const targets = await resolveTargets('group_action')
+    for (const resolution of targets) {
+      const jid = resolution.preferredId
       logger.info('commands', `[!] Processando rebaixamento | Alvo: ${jid}`)
       setPermLevel(jid, groupJid, 0)
       await safeDemote(sock, groupJid, jid)
@@ -1965,18 +1976,19 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
   // ─── !ban ───
   if (cmd === '!ban') {
     logger.info('commands', `[!] !ban acionado | Executor: ${userJid} | Grupo: ${groupJid}`)
-    const mentioned = extractTargets(msg, text)
-    if (!mentioned.length) { 
+    const targets = await resolveTargets('group_action')
+    if (!targets.length) {
       logger.warn('commands', `[!] !ban sem alvo identificado`)
-      await safeSendMessage(sock, groupJid, { text: 'Marque alguem. Ex: !ban @user ou !ban @5517...' }); 
-      return true 
+      await safeSendMessage(sock, groupJid, { text: 'Marque alguem. Ex: !ban @user ou !ban @5517...' })
+      return true
     }
-    for (const jid of mentioned) {
+    for (const resolution of targets) {
+      const jid = resolution.preferredId
       try {
         logger.info('commands', `[!] Processando banimento | Alvo: ${jid}`)
         await safeRemove(sock, groupJid, jid)
         resetStrikesDB(jid, groupJid)
-        await safeSendMessage(sock, groupJid, { text: `\ud83d\udc80 ${resolveUser(jid, groupJid)} caiu...`, mentions: [jid] })
+        await safeSendMessage(sock, groupJid, { text: `💀 ${resolveUser(jid, groupJid)} caiu...`, mentions: [jid] })
       } catch (err) {
         logger.error('commands', `[!] !ban falhou localmente | Alvo: ${jid} | Motivo: ${err.message}`)
         await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
@@ -1987,10 +1999,11 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
 
   // ─── !aviso ───
   if (cmd === '!aviso') {
-    const mentioned = extractTargets(msg, text)
-    if (!mentioned.length) { await safeSendMessage(sock, groupJid, { text: 'Marque alguem.' }); return true }
+    const targets = await resolveTargets('group_action')
+    if (!targets.length) { await safeSendMessage(sock, groupJid, { text: 'Marque alguem.' }); return true }
     const gc = getGroupConfig(groupJid)
-    for (const jid of mentioned) {
+    for (const resolution of targets) {
+      const jid = resolution.preferredId
       const count = addStrikeDB(jid, groupJid)
       await sendStrikeWarning(sock, groupJid, jid, count, gc.max_penalties, 'aviso manual')
       if (count >= gc.max_penalties) { await safeRemove(sock, groupJid, jid); resetStrikesDB(jid, groupJid) }
@@ -2000,9 +2013,9 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
 
   // ─── !reset ───
   if (cmd === '!reset') {
-    const mentioned = extractTargets(msg, text)
-    if (!mentioned.length) { await safeSendMessage(sock, groupJid, { text: 'Marque alguém.' }); return true }
-    for (const jid of mentioned) resetStrikesDB(jid, groupJid)
+    const targets = await resolveTargets('group_action')
+    if (!targets.length) { await safeSendMessage(sock, groupJid, { text: 'Marque alguém.' }); return true }
+    for (const resolution of targets) resetStrikesDB(resolution.preferredId, groupJid)
     await safeSendMessage(sock, groupJid, { text: '✅ Strikes resetados.' })
     return true
   }
@@ -2089,29 +2102,12 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
 
   // ─── !perfil ───
   if (cmd === '!perfil') {
-    let targetJid = userJid
-    const mentionedRaw = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || []
-    const quotedParticipantRaw = msg.message?.extendedTextMessage?.contextInfo?.participant || ''
-    
-    // Filtra o bot das menções se ele foi respondido acidentalmente
+    // Resolver central: filtra bot, suporta mention/reply/@digitos/LID
     const botJid = sock?.user?.id ? getBaseJid(sock.user.id) : `${config.phoneNumber}@s.whatsapp.net`
-    const realMentions = mentionedRaw.filter(j => getBaseJid(j) !== botJid)
+    const profileTargets = await resolveTargets('profile_lookup')
+    const filteredTargets = profileTargets.filter(r => r.preferredId !== botJid)
 
-    if (realMentions.length > 0) {
-      targetJid = getBaseJid(realMentions[0])
-    } else if (quotedParticipantRaw && getBaseJid(quotedParticipantRaw) !== botJid) {
-      targetJid = getBaseJid(quotedParticipantRaw)
-    } else {
-      const match = text.match(/@(\d{10,15})/)
-      if (match) targetJid = `${match[1]}@s.whatsapp.net`
-    }
-    
-    // Normalizar LIDs do usuário interceptado
-    const { lidToJid } = require('./pipeline')
-    if (targetJid.endsWith('@lid')) {
-      const mapped = lidToJid.get(targetJid)
-      if (mapped) targetJid = getBaseJid(mapped)
-    }
+    let targetJid = filteredTargets.length > 0 ? filteredTargets[0].preferredId : userJid
 
     const data = getUserData(targetJid, groupJid)
     const levels = { 0: 'Membro', 1: 'VIP', 2: 'Mod', 3: 'Dono' }
@@ -2151,8 +2147,8 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
 
   // ─── !conquistas ───
   if (cmd === '!conquistas') {
-    const mentionedRaw = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || []
-    const targetJid = mentionedRaw.length > 0 ? getBaseJid(mentionedRaw[0]) : userJid
+    const conquTargets = await resolveTargets('profile_lookup')
+    const targetJid = conquTargets.length > 0 ? conquTargets[0].preferredId : userJid
     const list = formatAchievementList(targetJid, groupJid)
     const count = countAchievements(targetJid, groupJid)
     const resolvedName = resolveUser(targetJid, groupJid)
