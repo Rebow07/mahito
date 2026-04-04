@@ -103,6 +103,59 @@ function buildPipelineMessage(extracted) {
   return msg
 }
 
+
+function extractGroupParticipantsUpdate(payload) {
+  const data = payload.data || {}
+  const candidates = [data, data.data || {}, data.payload || {}, payload]
+
+  const pick = (...vals) => vals.find(v => v !== undefined && v !== null && v !== '')
+  const normalizeParticipants = (v) => {
+    if (!v) return []
+    if (Array.isArray(v)) return v.map(x => typeof x === 'string' ? x : (x.id || x.jid || x.participant || x.user || '')).filter(Boolean)
+    if (typeof v === 'string') return [v]
+    return []
+  }
+  const normalizeAction = (a) => {
+    const s = String(a || '').toLowerCase()
+    if (['add','added','invite','joined','join'].includes(s)) return 'add'
+    if (['remove','removed','leave','left','kick'].includes(s)) return 'remove'
+    return s || null
+  }
+
+  let groupId = ''
+  let action = null
+  let participants = []
+  for (const c of candidates) {
+    groupId = groupId || pick(c.id, c.groupId, c.groupJid, c.remoteJid, c.jid, c.chatId) || ''
+    action = action || normalizeAction(pick(c.action, c.eventType, c.operation, c.type))
+    if (!participants.length) participants = normalizeParticipants(pick(c.participants, c.users, c.members, c.participant))
+  }
+
+  if (!groupId || !groupId.includes('@g.us') || !action || !participants.length) return null
+  return { id: groupId, action, participants }
+}
+
+function extractGroupParticipantsUpdateFromMessage(payload) {
+  const data = payload.data || {}
+  const key = data.key || {}
+  const message = data.message || {}
+  const msgType = String(data.messageType || '').toLowerCase()
+  const stubType = data.messageStubType || message?.messageStubType || message?.protocolMessage?.type || ''
+  const remoteJid = key.remoteJid || data.remoteJid || ''
+  const participant = data.participant || key.participant || ''
+  if (!remoteJid || !remoteJid.includes('@g.us')) return null
+
+  const stub = String(stubType).toLowerCase()
+  let action = null
+  if (msgType.includes('group') || stub.includes('group') || stub.includes('participant')) {
+    if (stub.includes('add') || stub.includes('join') || stub === 'group_participants_add') action = 'add'
+    if (stub.includes('remove') || stub.includes('leave') || stub.includes('kick')) action = 'remove'
+  }
+  if (!action && message?.groupInviteMessage) action = 'add'
+  if (!action || !participant) return null
+  return { id: remoteJid, action, participants: [participant] }
+}
+
 // ─── Leitura do body HTTP cru (built-in http, sem express) ───────────────────
 
 function readBody(req) {
@@ -163,6 +216,21 @@ async function handleWebhookRequest(req, res, sock) {
     else state.botJid = parsedSender
   }
 
+  // Eventos diretos de participantes de grupo (modo webhook-only)
+  if (/participant/i.test(evt.event) || /group/i.test(evt.event)) {
+    const update = extractGroupParticipantsUpdate(payload)
+    if (update) {
+      logger.info('webhook', `groupParticipants action=${update.action} group=${update.id} participants=${update.participants.join(',')}`)
+      try {
+        const { handleGroupParticipantsUpdate } = require('./moderation')
+        await handleGroupParticipantsUpdate(sock, update)
+      } catch (err) {
+        logger.error('webhook', `Erro ao processar evento de participantes: ${err.message}`)
+      }
+      return
+    }
+  }
+
   if (evt.event === 'messages.upsert') {
     const extracted = extractIncomingMessage(payload)
 
@@ -172,6 +240,17 @@ async function handleWebhookRequest(req, res, sock) {
     }
 
     if (!extracted.text) {
+      const participantUpdate = extractGroupParticipantsUpdateFromMessage(payload)
+      if (participantUpdate) {
+        logger.info('webhook', `participantStub action=${participantUpdate.action} group=${participantUpdate.id} participants=${participantUpdate.participants.join(',')}`)
+        try {
+          const { handleGroupParticipantsUpdate } = require('./moderation')
+          await handleGroupParticipantsUpdate(sock, participantUpdate)
+        } catch (err) {
+          logger.error('webhook', `Erro ao processar participantStub: ${err.message}`)
+        }
+        return
+      }
       logger.info('webhook', `mensagem sem texto de ${extracted.jid} — ignorando (mídia não suportada via webhook ainda)`)
       return
     }

@@ -351,16 +351,16 @@ async function handleGroupParticipantsUpdate(sock, update) {
   if (update.action === 'add' && groupConfig.welcome_enabled) {
     for (const participant of update.participants || []) {
       const baseJid = getBaseJid(participant)
-      const number = jidToNumber(baseJid)
-      const text = String(groupConfig.welcome_text || '😈 Bem-vindo, @user. Tente não quebrar tão rápido.').replace('@user', resolveUser(baseJid, update.id))
+      const displayName = resolveUser(baseJid, update.id)
+      const text = String(groupConfig.welcome_text || '😈 Bem-vindo, @user. Tente não quebrar tão rápido.').replace('@user', displayName)
       await transport.sendText(update.id, text, { mentions: [baseJid] })
     }
   }
 
   if (update.action === 'remove' && groupConfig.leave_enabled) {
     const baseJid = getBaseJid(update.participants?.[0] || '')
-    const number = jidToNumber(baseJid)
-    const text = (groupConfig.leave_text || '☹️ @user não aguentou e abandonou o Mahito.').replace('@user', resolveUser(baseJid, update.id))
+    const displayName = resolveUser(baseJid, update.id)
+    const text = (groupConfig.leave_text || '☹️ @user não aguentou e abandonou o Mahito.').replace('@user', displayName)
     await transport.sendText(update.id, text, { mentions: [baseJid] })
     await enviarReacaoMahito(sock, update.id, 'ban').catch(() => {})
   }
