@@ -232,6 +232,49 @@ async function resolveGroup(jid, sock = null) {
   return await getGroupName(sock, jid)
 }
 
+/**
+ * Retorna a chave canônica e estável para persistência de dados de usuário.
+ *
+ * Regra de prioridade:
+ *  1. número@s.whatsapp.net  (quando número conhecido — mais estável, portável)
+ *  2. @lid                   (quando LID conhecido mas não o número)
+ *  3. @s.whatsapp.net        (JID normal)
+ *  4. Fallback: getBaseJid do input
+ *
+ * Design intencional:
+ *  - Lê APENAS o _aliasCache em memória (O(1), zero I/O, zero logging)
+ *  - Adequado para ser chamado em hot-paths: addXP, trackUserActivity, etc.
+ *  - O cache é populado pelo learnAlias chamado no pipeline antes de qualquer processamento
+ *
+ * Efeito na consistência:
+ *  - Uma vez que a identidade do usuário é aprendida (number↔lid↔jid),
+ *    todas as escritas futuras convergem para a mesma chave
+ *  - getUserData faz a migração lazy para registros antigos sob chaves diferentes
+ *
+ * @param {string} jid  Qualquer forma: @lid, @s.whatsapp.net, número puro
+ * @returns {string}    Chave canônica para uso em users_data.user_id
+ */
+function canonicalUserKey(jid) {
+  const base = getBaseJid(String(jid || ''))
+
+  // Lookup no cache de aliases (Map, O(1))
+  let cached = _aliasCache.get(base)
+
+  // Se não encontrou, tenta pelos dígitos puros (ex: LID sem sufixo)
+  if (!cached) {
+    const digits = base.split('@')[0]
+    if (digits && digits.length >= 6) cached = _aliasCache.get(digits)
+  }
+
+  if (cached) {
+    if (cached.number) return `${cached.number}@s.whatsapp.net`
+    if (cached.lid)    return cached.lid
+    if (cached.jid)    return cached.jid
+  }
+
+  return base
+}
+
 module.exports = {
   resolveUser,
   resolveGroup,
@@ -239,5 +282,6 @@ module.exports = {
   learnAlias,
   loadAliasesFromDB,
   isSameIdentity,
-  getAliasesFor
+  getAliasesFor,
+  canonicalUserKey
 }

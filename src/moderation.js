@@ -79,7 +79,7 @@ function checkSpam(userJid, groupJid) {
   const now = Date.now()
   const max = Number(config.max_msgs || 5)
   const interval = Number(config.intervalo_seg || 60) * 1000
-  const mapKey = `${userJid}:${groupJid}`
+  const mapKey = `${getBaseJid(userJid)}:${getBaseJid(groupJid)}`
 
   if (!state.messageTracker[mapKey]) state.messageTracker[mapKey] = []
   

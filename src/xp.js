@@ -35,7 +35,14 @@ function calcLevel(xp, formula) {
 
 function processXp(userJid, groupJid, messageType) {
   const d = getDB()
-  const uid = getBaseJid(userJid)
+  // Usa chave canônica para garantir consistência com users_data gravado em db.js
+  let uid
+  try {
+    const { canonicalUserKey } = require('./identity')
+    uid = canonicalUserKey(userJid)
+  } catch {
+    uid = getBaseJid(userJid)
+  }
   const gid = getBaseJid(groupJid)
 
   const groupConfig = getGroupXpConfig(gid)

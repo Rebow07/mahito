@@ -2,6 +2,20 @@ const Database = require('better-sqlite3')
 const path = require('path')
 const { PATHS } = require('./state')
 const { getBaseJid } = require('./utils')
+const logger = require('./logger')
+
+// ─── Chave canônica de persistência ──────────────────────────────────────────
+// Wrapper interno que delega para identity.canonicalUserKey (lazy require para
+// evitar dependência circular no topo do módulo).
+// Retorna sempre um JID base normalizado e estável para uso em users_data.
+function _ckey(jid) {
+  try {
+    const { canonicalUserKey } = require('./identity')
+    return canonicalUserKey(jid)
+  } catch {
+    return getBaseJid(jid)
+  }
+}
 
 const DB_PATH = path.join(PATHS.DATA_DIR, 'mahito.db')
 
@@ -337,14 +351,44 @@ function setGroupConfig(groupId, key, value) {
 
 function getUserData(userId, groupId) {
   const d = getDB()
-  const uid = getBaseJid(userId)
+  const canonicalKey = _ckey(userId)
   const gid = getBaseJid(groupId)
-  let row = d.prepare('SELECT * FROM users_data WHERE user_id = ? AND group_id = ?').get(uid, gid)
-  if (!row) {
-    d.prepare('INSERT OR IGNORE INTO users_data (user_id, group_id) VALUES (?, ?)').run(uid, gid)
-    row = d.prepare('SELECT * FROM users_data WHERE user_id = ? AND group_id = ?').get(uid, gid)
-  }
-  return row
+
+  // 1. Tenta pela chave canônica (caminho feliz — O(1) após aliases aprendidos)
+  let row = d.prepare('SELECT * FROM users_data WHERE user_id = ? AND group_id = ?').get(canonicalKey, gid)
+  if (row) return row
+
+  // 2. Fallback por aliases conhecidos com migração lazy
+  //    Busca dados salvos sob forma anterior (@lid, @jid, número) e consolida
+  try {
+    const { getAliasesFor } = require('./identity')
+    const aliases = getAliasesFor(userId)
+    for (const alias of aliases) {
+      const aliasKey = getBaseJid(String(alias))
+      if (!aliasKey || aliasKey === canonicalKey) continue
+
+      row = d.prepare('SELECT * FROM users_data WHERE user_id = ? AND group_id = ?').get(aliasKey, gid)
+      if (!row) continue
+
+      // Migração lazy: mover dado para chave canônica
+      const alreadyUnderCanonical = d.prepare('SELECT 1 FROM users_data WHERE user_id = ? AND group_id = ?').get(canonicalKey, gid)
+      if (!alreadyUnderCanonical) {
+        // Simples rename: aliasKey → canonicalKey
+        d.prepare('UPDATE users_data SET user_id = ? WHERE user_id = ? AND group_id = ?')
+          .run(canonicalKey, aliasKey, gid)
+        logger.info('db', `[CanonicalMigration] user_id ${aliasKey} → ${canonicalKey} no grupo ${gid}`)
+      } else {
+        // Ambos existem: manter canônico, descartar alias (sem mescla de XP por segurança)
+        logger.info('db', `[CanonicalMigration] Duplicata detectada: ${aliasKey} descartado em favor de ${canonicalKey} no grupo ${gid}`)
+        d.prepare('DELETE FROM users_data WHERE user_id = ? AND group_id = ?').run(aliasKey, gid)
+      }
+      return d.prepare('SELECT * FROM users_data WHERE user_id = ? AND group_id = ?').get(canonicalKey, gid) || row
+    }
+  } catch { /* identity não disponível ainda — silencioso */ }
+
+  // 3. Nenhum registro encontrado — criar sob chave canônica
+  d.prepare('INSERT OR IGNORE INTO users_data (user_id, group_id) VALUES (?, ?)').run(canonicalKey, gid)
+  return d.prepare('SELECT * FROM users_data WHERE user_id = ? AND group_id = ?').get(canonicalKey, gid)
 }
 
 function getTotalUsers() {
@@ -354,7 +398,7 @@ function getTotalUsers() {
 
 function addStrikeDB(userId, groupId) {
   const d = getDB()
-  const uid = getBaseJid(userId)
+  const uid = _ckey(userId)
   const gid = getBaseJid(groupId)
   d.prepare('INSERT OR IGNORE INTO users_data (user_id, group_id) VALUES (?, ?)').run(uid, gid)
   d.prepare('UPDATE users_data SET penalties = penalties + 1 WHERE user_id = ? AND group_id = ?').run(uid, gid)
@@ -363,7 +407,7 @@ function addStrikeDB(userId, groupId) {
 
 function resetStrikesDB(userId, groupId) {
   const d = getDB()
-  const uid = getBaseJid(userId)
+  const uid = _ckey(userId)
   const gid = getBaseJid(groupId)
   d.prepare('UPDATE users_data SET penalties = 0 WHERE user_id = ? AND group_id = ?').run(uid, gid)
 }
@@ -375,7 +419,7 @@ function getPermLevel(userId, groupId) {
 
 function setPermLevel(userId, groupId, level) {
   const d = getDB()
-  const uid = getBaseJid(userId)
+  const uid = _ckey(userId)
   const gid = getBaseJid(groupId)
   d.prepare('INSERT OR IGNORE INTO users_data (user_id, group_id) VALUES (?, ?)').run(uid, gid)
   d.prepare('UPDATE users_data SET perm_level = ? WHERE user_id = ? AND group_id = ?').run(level, uid, gid)
@@ -388,7 +432,7 @@ const XP_PER_LEVEL = 100
 
 function addXP(userId, groupId) {
   const d = getDB()
-  const uid = getBaseJid(userId)
+  const uid = _ckey(userId)
   const gid = getBaseJid(groupId)
   d.prepare('INSERT OR IGNORE INTO users_data (user_id, group_id) VALUES (?, ?)').run(uid, gid)
   d.prepare('UPDATE users_data SET xp = xp + ? WHERE user_id = ? AND group_id = ?').run(XP_PER_MESSAGE, uid, gid)
@@ -670,7 +714,7 @@ function getWeeklyStats(groupId) {
 
 function trackUserActivity(userId, groupId, pushName = '') {
   const d = getDB()
-  const uid = getBaseJid(userId)
+  const uid = _ckey(userId)
   const gid = getBaseJid(groupId)
   const now = Date.now()
   d.prepare('INSERT OR IGNORE INTO users_data (user_id, group_id) VALUES (?, ?)').run(uid, gid)
@@ -907,12 +951,12 @@ function getAliasesByNumber(number) {
 
 function getAliasesByJid(jid) {
   const d = getDB()
-  return d.prepare('SELECT * FROM identity_aliases WHERE jid = ?').get(jid) || null
+  return d.prepare('SELECT * FROM identity_aliases WHERE jid = ?').get(getBaseJid(jid)) || null
 }
 
 function getAliasesByLid(lid) {
   const d = getDB()
-  return d.prepare('SELECT * FROM identity_aliases WHERE lid = ?').get(lid) || null
+  return d.prepare('SELECT * FROM identity_aliases WHERE lid = ?').get(getBaseJid(lid)) || null
 }
 
 // ─── Secondary Owners ───

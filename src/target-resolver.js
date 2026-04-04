@@ -191,6 +191,13 @@ function _resolveSingle(rawTarget, participants, context, cmd) {
                || (rawDigits ? `${rawDigits}@s.whatsapp.net` : rawInput)
   }
 
+  // persistenceKey: chave canônica que será usada em users_data para este alvo
+  let persistenceKey = preferredId
+  try {
+    const { canonicalUserKey } = require('./identity')
+    persistenceKey = canonicalUserKey(preferredId)
+  } catch { /* identity não disponível */ }
+
   const resolution = {
     rawInput,
     extractedDigits: rawDigits,
@@ -200,6 +207,7 @@ function _resolveSingle(rawTarget, participants, context, cmd) {
     primaryJid: identity.primaryJid,
     lid: resolvedLid,
     preferredId,
+    persistenceKey,
     aliases: identity.aliases,
     participantMatch: match
       ? { matched: true, jid: match.jid, by: match.by }
@@ -217,6 +225,7 @@ function _resolveSingle(rawTarget, participants, context, cmd) {
     `aliases=[${resolution.aliases.join(',')}]`,
     `participantMatch=${match ? match.jid + ' by=' + match.by : 'false'}`,
     `preferredId=${preferredId}`,
+    `persistenceKey=${persistenceKey}`,
     `source=${rawTarget.source}`
   ].filter(Boolean).join(' | '))
 
