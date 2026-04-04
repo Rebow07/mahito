@@ -2107,7 +2107,8 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     const profileTargets = await resolveTargets('profile_lookup')
     const filteredTargets = profileTargets.filter(r => r.preferredId !== botJid)
 
-    let targetJid = filteredTargets.length > 0 ? filteredTargets[0].preferredId : userJid
+    const targetResolution = filteredTargets.length > 0 ? filteredTargets[0] : null
+    let targetJid = targetResolution ? targetResolution.preferredId : userJid
 
     const data = getUserData(targetJid, groupJid)
     const levels = { 0: 'Membro', 1: 'VIP', 2: 'Mod', 3: 'Dono' }
@@ -2125,7 +2126,8 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     else if (targetIsAdmin) cargo = '🛡️ Admin'
     else if (data.perm_level >= 1) cargo = levels[data.perm_level]
     
-    const resolvedName = resolveUser(targetJid, groupJid)
+    // Prioridade: displayName da resolução > resolveUser (com pushName) > fallback
+    const resolvedName = (targetResolution?.displayName) || resolveUser(targetJid, groupJid)
 
     const card =
       `┌──────────────────────┐\n` +
@@ -2148,10 +2150,11 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
   // ─── !conquistas ───
   if (cmd === '!conquistas') {
     const conquTargets = await resolveTargets('profile_lookup')
-    const targetJid = conquTargets.length > 0 ? conquTargets[0].preferredId : userJid
+    const conquResolution = conquTargets.length > 0 ? conquTargets[0] : null
+    const targetJid = conquResolution ? conquResolution.preferredId : userJid
     const list = formatAchievementList(targetJid, groupJid)
     const count = countAchievements(targetJid, groupJid)
-    const resolvedName = resolveUser(targetJid, groupJid)
+    const resolvedName = conquResolution?.displayName || resolveUser(targetJid, groupJid)
     await safeSendMessage(sock, groupJid, {
       text: `🏆 *Conquistas de ${resolvedName}* (${count}/${TOTAL_ACHIEVEMENTS})\n\n${list}`,
       mentions: [targetJid]

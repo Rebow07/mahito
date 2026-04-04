@@ -132,6 +132,8 @@ function findParticipantMatch(participants, rawInput) {
  * @property {string|null}   primaryJid
  * @property {string|null}   lid
  * @property {string}        preferredId     ID final correto para o contexto
+ * @property {string|null}   displayName     Nome humano mais rico disponível (pushName, número formatado ou null)
+ * @property {string}        displaySource   Origem do displayName: 'pushName' | 'number' | 'none'
  * @property {string[]}      aliases
  * @property {{ matched: boolean, jid?: string, by?: string }} participantMatch
  */
@@ -198,6 +200,22 @@ function _resolveSingle(rawTarget, participants, context, cmd) {
     persistenceKey = canonicalUserKey(preferredId)
   } catch { /* identity não disponível */ }
 
+  // ── Passo 4: Resolver nome de exibição mais humano possível ─────────────
+  let displayName = null
+  let displaySource = 'none'
+  try {
+    const { resolveUser } = require('./identity')
+    const candidate = resolveUser(preferredId, null)
+    // Se não caiu no fallback genérico, aceita
+    if (candidate && !candidate.startsWith('[Oculto:') && candidate !== preferredId) {
+      displayName = candidate
+      displaySource = identity.pushName ? 'pushName' : 'number'
+    } else if (identity.pushName) {
+      displayName = identity.pushName
+      displaySource = 'pushName'
+    }
+  } catch { /* silencioso */ }
+
   const resolution = {
     rawInput,
     extractedDigits: rawDigits,
@@ -208,6 +226,8 @@ function _resolveSingle(rawTarget, participants, context, cmd) {
     lid: resolvedLid,
     preferredId,
     persistenceKey,
+    displayName,
+    displaySource,
     aliases: identity.aliases,
     participantMatch: match
       ? { matched: true, jid: match.jid, by: match.by }

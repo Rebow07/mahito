@@ -188,6 +188,11 @@ function resolveUser(jid, groupId = null) {
     if (id.primaryJid || id.number) {
       return resolveUser(id.primaryJid || `${id.number}@s.whatsapp.net`, groupId)
     }
+    // pushName conhecido mas sem número/JID — exibe nome com indicador LID
+    if (id.pushName && id.pushName.trim().length > 0) {
+      return `${id.pushName.trim()} (LID)`
+    }
+    // Fallback absoluto
     return `[Oculto: ${baseUserJid.split('@')[0]}]`
   }
 
