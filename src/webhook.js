@@ -142,7 +142,7 @@ function extractGroupParticipantsUpdateFromMessage(payload) {
   const msgType = String(data.messageType || '').toLowerCase()
   const stubType = data.messageStubType || message?.messageStubType || message?.protocolMessage?.type || ''
   const remoteJid = key.remoteJid || data.remoteJid || ''
-  const participant = data.participant || key.participant || ''
+  let participant = data.participant || key.participant || ''
   if (!remoteJid || !remoteJid.includes('@g.us')) return null
 
   const stub = String(stubType).toLowerCase()
@@ -152,6 +152,18 @@ function extractGroupParticipantsUpdateFromMessage(payload) {
     if (stub.includes('remove') || stub.includes('leave') || stub.includes('kick')) action = 'remove'
   }
   if (!action && message?.groupInviteMessage) action = 'add'
+
+  if (!participant) {
+    const ctx = message?.extendedTextMessage?.contextInfo || message?.imageMessage?.contextInfo || message?.videoMessage?.contextInfo || {}
+    participant = ctx.participant || (Array.isArray(ctx.mentionedJid) ? ctx.mentionedJid[0] : '') || ''
+  }
+
+  const body = String(data.body || data.text || '').toLowerCase()
+  if (!action && participant) {
+    if (/(adicionou|added|join|joined|entrou)/i.test(body)) action = 'add'
+    if (/(removeu|removed|left|leave|saiu|kick)/i.test(body)) action = 'remove'
+  }
+
   if (!action || !participant) return null
   return { id: remoteJid, action, participants: [participant] }
 }
@@ -239,18 +251,19 @@ async function handleWebhookRequest(req, res, sock) {
       return
     }
 
-    if (!extracted.text) {
-      const participantUpdate = extractGroupParticipantsUpdateFromMessage(payload)
-      if (participantUpdate) {
-        logger.info('webhook', `participantStub action=${participantUpdate.action} group=${participantUpdate.id} participants=${participantUpdate.participants.join(',')}`)
-        try {
-          const { handleGroupParticipantsUpdate } = require('./moderation')
-          await handleGroupParticipantsUpdate(sock, participantUpdate)
-        } catch (err) {
-          logger.error('webhook', `Erro ao processar participantStub: ${err.message}`)
-        }
-        return
+    const participantUpdate = extractGroupParticipantsUpdateFromMessage(payload)
+    if (participantUpdate) {
+      logger.info('webhook', `participantStub action=${participantUpdate.action} group=${participantUpdate.id} participants=${participantUpdate.participants.join(',')}`)
+      try {
+        const { handleGroupParticipantsUpdate } = require('./moderation')
+        await handleGroupParticipantsUpdate(sock, participantUpdate)
+      } catch (err) {
+        logger.error('webhook', `Erro ao processar participantStub: ${err.message}`)
       }
+      return
+    }
+
+    if (!extracted.text) {
       logger.info('webhook', `mensagem sem texto de ${extracted.jid} — ignorando (mídia não suportada via webhook ainda)`)
       return
     }

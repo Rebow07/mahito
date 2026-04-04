@@ -96,14 +96,30 @@ function _resolveSingle(rawTarget, participants, groupJid, context, cmd) {
     persistenceKey = canonicalUserKey(match?.jid || identity.primaryJid || resolvedLid || preferredId)
   } catch {}
 
-  let displayName = participantDisplayName || identity.pushName || null
-  let displaySource = participantDisplayName ? 'group_participant' : (identity.pushName ? 'pushName' : 'none')
+  let displayName = participantDisplayName || null
+  let displaySource = participantDisplayName ? 'group_participant' : 'none'
+
+  if (!displayName && groupJid) {
+    try {
+      const { getUserData } = require('./db')
+      const persisted = getUserData(match?.jid || identity.primaryJid || resolvedLid || preferredId, groupJid)
+      if (persisted?.push_name && String(persisted.push_name).trim()) {
+        displayName = String(persisted.push_name).trim()
+        displaySource = 'persisted_push_name'
+      }
+    } catch {}
+  }
+
+  if (!displayName && identity.pushName) {
+    displayName = identity.pushName
+    displaySource = 'pushName'
+  }
 
   if (!displayName) {
     try {
       const { resolveUser } = require('./identity')
       const candidate = resolveUser(match?.jid || identity.primaryJid || preferredMentionId, groupJid)
-      if (candidate && !candidate.startsWith('[Oculto:') && candidate !== preferredId) {
+      if (candidate && !candidate.startsWith('[Oculto:') && candidate !== preferredId && !/^\+?\d[\d\s-]+$/.test(candidate)) {
         displayName = candidate
         displaySource = 'resolved'
       }
