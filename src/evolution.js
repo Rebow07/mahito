@@ -139,7 +139,12 @@ async function updateParticipant(groupJid, action, participants = [], instance) 
   try { cfg = assertReady() } catch (err) { return false }
   const inst = instance || cfg.instance
   
-  const parsedParticipants = participants.map(p => String(p).replace(/@s\.whatsapp\.net$/, ''))
+  // Preserva @lid para grupos LID-mode; remove @s.whatsapp.net para números normais
+  const parsedParticipants = participants.map(p => {
+    const s = String(p)
+    if (s.endsWith('@lid')) return s        // LID: manda completo (ex: 35291830214779@lid)
+    return s.replace(/@s\.whatsapp\.net$/, '') // número: apenas dígitos
+  })
   
   try {
     const payload = {

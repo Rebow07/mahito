@@ -143,8 +143,8 @@ function extractTargets(msg, text) {
       const digits = m[1]
       // Verifica se parece LID (muito longo) ou número real JID
       // LIDs tipicamente têm 15+ dígitos e não começam com código de país
-      if (digits.length >= 15) {
-        // Tratar como LID bruto
+      if (digits.length >= 14) {
+        // Tratar como LID bruto (LIDs têm 14-15 dígitos; números de telefone ≤ 13)
         return `${digits}@lid`
       }
       return `${digits}@s.whatsapp.net`
