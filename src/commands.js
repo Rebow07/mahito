@@ -1696,15 +1696,16 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     const levelNames = { 0: 'Membro', 1: 'VIP', 2: 'Mod', 3: 'Dono' }
     for (const resolution of targets) {
       const jid = getPreferredActionId(resolution)
+      const mentionJid = getPreferredMentionId(resolution) || jid
+      const displayName = getBestDisplayName(resolution, mentionJid, groupJid)
       logger.info('commands', `[!] Processando promoção | Alvo: ${jid} | Nível: ${level}`)
-      setPermLevel(jid, groupJid, level)
+      setPermLevel(getPersistenceKey(resolution) || jid, groupJid, level)
       if (level >= 1) {
         await safePromote(sock, groupJid, jid)
       }
-      const num = jidToNumber(jid)
       await safeSendMessage(sock, groupJid, {
-        text: `👑 @${num} foi promovido a *${levelNames[level]}* (nível ${level})`,
-        mentions: [jid]
+        text: `👑 ${displayName} foi promovido a *${levelNames[level]}* (nível ${level})`,
+        mentions: [mentionJid]
       })
     }
     return true
@@ -1721,10 +1722,12 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     const targets = await resolveTargets('group_action')
     for (const resolution of targets) {
       const jid = getPreferredActionId(resolution)
+      const mentionJid = getPreferredMentionId(resolution) || jid
+      const displayName = getBestDisplayName(resolution, mentionJid, groupJid)
       logger.info('commands', `[!] Processando rebaixamento | Alvo: ${jid}`)
-      setPermLevel(jid, groupJid, 0)
+      setPermLevel(getPersistenceKey(resolution) || jid, groupJid, 0)
       await safeDemote(sock, groupJid, jid)
-      await safeSendMessage(sock, groupJid, { text: `📉 ${resolveUser(jid, groupJid)} voltou ao nível 0 (Membro)`, mentions: [jid] })
+      await safeSendMessage(sock, groupJid, { text: `📉 ${displayName} voltou ao nível 0 (Membro)`, mentions: [mentionJid] })
     }
     return true
   }
@@ -2117,7 +2120,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     const data = getUserData(targetDataKey, groupJid)
     const levels = { 0: 'Membro', 1: 'VIP', 2: 'Mod', 3: 'Dono' }
     const nextLevelXP = (data.level + 1) * XP_PER_LEVEL
-    const achievementCount = countAchievements(targetJid, groupJid)
+    const achievementCount = countAchievements(targetDataKey, groupJid)
     const firstSeen = data.first_seen ? new Date(data.first_seen).toLocaleDateString('pt-BR') : 'Desconhecido'
     const lastMsg = data.last_message_at ? new Date(data.last_message_at).toLocaleDateString('pt-BR') : 'Nunca'
     
@@ -2153,8 +2156,9 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
 
   // ─── !conquistas ───
   if (cmd === '!conquistas') {
+    const botJid = sock?.user?.id ? getBaseJid(sock.user.id) : `${config.phoneNumber}@s.whatsapp.net`
     const conquTargets = await resolveTargets('profile_lookup')
-    const conquResolution = conquTargets.length > 0 ? conquTargets[0] : null
+    const conquResolution = conquTargets.find(r => r.preferredId !== botJid) || null
     const mentionJid = conquResolution ? getPreferredMentionId(conquResolution) : userJid
     const targetDataKey = conquResolution ? (getPersistenceKey(conquResolution) || mentionJid) : userJid
     const list = formatAchievementList(targetDataKey, groupJid)
