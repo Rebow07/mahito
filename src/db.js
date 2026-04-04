@@ -284,7 +284,16 @@ function initTables() {
     "ALTER TABLE groups_config ADD COLUMN persona_id TEXT DEFAULT 'mahito-padrao'",
     'ALTER TABLE users_data ADD COLUMN last_xp_at TEXT',
     'ALTER TABLE users_data ADD COLUMN push_name TEXT',
-    'CREATE TABLE IF NOT EXISTS secondary_owners (id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, added_at INTEGER NOT NULL)'
+    'CREATE TABLE IF NOT EXISTS secondary_owners (id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, added_at INTEGER NOT NULL)',
+    `CREATE TABLE IF NOT EXISTS identity_aliases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      number TEXT NOT NULL,
+      jid TEXT,
+      lid TEXT,
+      push_name TEXT,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(number)
+    )`
   ]
   for (const sql of migrations) {
     try { d.exec(sql) } catch {}
@@ -775,7 +784,11 @@ module.exports = {
   addSecondaryOwner,
   removeSecondaryOwner,
   getSecondaryOwners,
-  isSecondaryOwner
+  isSecondaryOwner,
+  upsertIdentityAlias,
+  getAliasesByNumber,
+  getAliasesByJid,
+  getAliasesByLid
 }
 
 // ─── AI Persona & Token Usage ───
@@ -862,6 +875,44 @@ function setBotConfig(key, value) {
 function getOwnerReminders(userJid) {
   const d = getDB()
   return d.prepare('SELECT * FROM reminders WHERE user_jid = ? AND active = 1 ORDER BY datetime_alvo').all(userJid)
+}
+
+// ─── Identity Aliases ───
+
+/**
+ * Persiste/atualiza relação number ↔ jid ↔ lid no banco.
+ * Campos opcionais: apenas os fornecidos são atualizados.
+ */
+function upsertIdentityAlias({ number, jid, lid, push_name } = {}) {
+  const d = getDB()
+  const num = String(number || '').replace(/\D/g, '')
+  if (!num) return
+  const now = Date.now()
+  d.prepare(`
+    INSERT INTO identity_aliases (number, jid, lid, push_name, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(number) DO UPDATE SET
+      jid = COALESCE(excluded.jid, jid),
+      lid = COALESCE(excluded.lid, lid),
+      push_name = COALESCE(excluded.push_name, push_name),
+      updated_at = excluded.updated_at
+  `).run(num, jid || null, lid || null, push_name || null, now)
+}
+
+function getAliasesByNumber(number) {
+  const d = getDB()
+  const num = String(number).replace(/\D/g, '')
+  return d.prepare('SELECT * FROM identity_aliases WHERE number = ?').get(num) || null
+}
+
+function getAliasesByJid(jid) {
+  const d = getDB()
+  return d.prepare('SELECT * FROM identity_aliases WHERE jid = ?').get(jid) || null
+}
+
+function getAliasesByLid(lid) {
+  const d = getDB()
+  return d.prepare('SELECT * FROM identity_aliases WHERE lid = ?').get(lid) || null
 }
 
 // ─── Secondary Owners ───

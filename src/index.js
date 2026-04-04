@@ -10,7 +10,7 @@ const { getBaseJid, sleep } = require('./utils')
 const logger = require('./logger')
 
 const transport = require('./transport/whatsapp')
-const { processIncomingMessage, lidToJid } = require('./pipeline')
+const { processIncomingMessage, lidToJid, loadAliasesFromDB } = require('./pipeline')
 const { scheduleAllMessages } = require('./commands')
 
 // rememberRecentMessage movido para pipeline.js
@@ -53,6 +53,8 @@ async function bootSequence() {
   process.stdout.write('\x1b[36m] 100%\x1b[0m\n\n')
 
   try { migrateFromJSON() } catch (err) { logger.warn('index', `Migração JSON: ${err.message}`) }
+  // Carregar aliases de identidade do banco
+  try { loadAliasesFromDB() } catch (err) { logger.warn('index', `AliasCache boot: ${err.message}`) }
   return loadConfig()
 }
 
@@ -108,20 +110,27 @@ async function connect() {
   sock.ev.on('creds.update', saveCreds)
 
   sock.ev.on('contacts.upsert', (contacts) => {
+    const { learnAlias } = require('./identity')
     for (const contact of contacts) {
       if (contact.lid && contact.id && contact.id.endsWith('@s.whatsapp.net')) {
         lidToJid.set(contact.lid, contact.id)
+        const num = String(contact.id.split('@')[0]).replace(/\D/g, '')
+        learnAlias({ number: num, jid: contact.id, lid: contact.lid, pushName: contact.name || contact.notify || null })
       } else if (contact.id && contact.id.endsWith('@lid') && contact.phoneNumber) {
-        // Fallback case just in case Baileys structure differs
-        lidToJid.set(contact.id, `${contact.phoneNumber}@s.whatsapp.net`)
+        const jidFull = `${contact.phoneNumber}@s.whatsapp.net`
+        lidToJid.set(contact.id, jidFull)
+        learnAlias({ number: contact.phoneNumber, jid: jidFull, lid: contact.id, pushName: contact.name || null })
       }
     }
   })
 
   sock.ev.on('contacts.update', (contacts) => {
+    const { learnAlias } = require('./identity')
     for (const contact of contacts) {
       if (contact.lid && contact.id && contact.id.endsWith('@s.whatsapp.net')) {
         lidToJid.set(contact.lid, contact.id)
+        const num = String(contact.id.split('@')[0]).replace(/\D/g, '')
+        learnAlias({ number: num, jid: contact.id, lid: contact.lid })
       }
     }
   })

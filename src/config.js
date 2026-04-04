@@ -91,35 +91,50 @@ function saveConfig(config) {
  * Verifica se um jid é dono, em duas camadas:
  *  - master: ownerNumbers do .env/config → nunca pode ser removido
  *  - secondary: tabela secondary_owners no banco
+ * Usa identidade normalizada e aliases (JID, LID, número) para comparar.
  * @returns {false | 'master' | 'secondary'}
  */
 function isOwner(jid, config) {
-  const rawNumber = jidToNumber(jid)
-  // Limpa para somente dígitos para comparação segura
-  const senderNum = String(rawNumber).replace(/\D/g, '')
-
+  const { resolveIdentity } = require('./identity')
+  
+  const identity = resolveIdentity(jid)
   const masterOwners = (config.ownerNumbers || []).map(n => String(n).replace(/\D/g, ''))
 
-  logger.info('identity', `[OwnerCheck] Bruto: ${jid} | Número extraído: ${senderNum} | Masters config: [${masterOwners.join(', ')}]`)
+  logger.info('identity', [
+    `[OwnerCheck] raw=${jid}`,
+    `number=${identity.number}`,
+    `primaryJid=${identity.primaryJid}`,
+    `lid=${identity.lid}`,
+    `aliases=[${identity.aliases.join(', ')}]`,
+    `source=${identity.source}`,
+    `masters=[${masterOwners.join(', ')}]`
+  ].join(' | '))
 
   // Camada 1: master owner (config/.env)
-  if (masterOwners.includes(senderNum)) {
-    logger.info('identity', `[OwnerCheck] Nível: master | Número ${senderNum} encontrado no config.`)
-    return 'master'
+  // Compara qualquer alias do executor contra master owners
+  for (const alias of identity.aliases) {
+    const aliasNum = String(alias).replace(/\D/g, '').replace(/@.*$/, '')
+    if (masterOwners.includes(aliasNum)) {
+      logger.info('identity', `[OwnerCheck] Nível: master | Alias '${alias}' (num=${aliasNum}) bateu no config.`)
+      return 'master'
+    }
   }
 
   // Camada 2: secondary owners (banco)
   try {
     const { isSecondaryOwner } = require('./db')
-    if (isSecondaryOwner(senderNum)) {
-      logger.info('identity', `[OwnerCheck] Nível: secondary | Número ${senderNum} encontrado no banco.`)
-      return 'secondary'
+    for (const alias of identity.aliases) {
+      const aliasNum = String(alias).replace(/\D/g, '').replace(/@.*$/, '')
+      if (aliasNum.length >= 8 && isSecondaryOwner(aliasNum)) {
+        logger.info('identity', `[OwnerCheck] Nível: secondary | Alias '${alias}' (num=${aliasNum}) encontrado no banco.`)
+        return 'secondary'
+      }
     }
   } catch (err) {
     logger.error('identity', `[OwnerCheck] Erro ao checar banco: ${err.message}`)
   }
 
-  logger.info('identity', `[OwnerCheck] Nível: none | ${senderNum} não é owner.`)
+  logger.info('identity', `[OwnerCheck] Nível: none | Nenhum alias [${identity.aliases.join(', ')}] é owner.`)
   return false
 }
 

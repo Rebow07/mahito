@@ -27,6 +27,7 @@ const {
 } = require('./commands')
 const { isAdmin } = require('./group')
 const { checkAndUnlockAchievements, formatAchievementNotification } = require('./achievements')
+const { learnAlias, loadAliasesFromDB } = require('./identity')
 
 // ─── LID → JID Map ──────────────────────────────────────────────────────────
 // Populado pelo index.js via eventos contacts.upsert / contacts.update do Baileys.
@@ -87,6 +88,17 @@ async function processIncomingMessage(msg, sock, evType) {
       logger.info('identity', `[Resolver] Sender @lid convertido: ${originalSenderJid} ➔ ${senderJid}`)
     } else {
       logger.warn('identity', `[Resolver] Falha ao converter @lid: ${originalSenderJid}`)
+    }
+  }
+
+  // Alimentar alias cache: pushName + relacionamento jid/lid/número
+  {
+    const rawLid = originalSenderJid.endsWith('@lid') ? originalSenderJid : null
+    const rawJid = senderJid.endsWith('@s.whatsapp.net') ? senderJid : null
+    const rawNum = rawJid ? String(jidToNumber(rawJid)).replace(/\D/g, '') : null
+    const pn = msg.pushName || null
+    if (rawNum || rawJid || rawLid) {
+      learnAlias({ number: rawNum, jid: rawJid, lid: rawLid, pushName: pn })
     }
   }
 
@@ -397,4 +409,4 @@ async function processIncomingMessage(msg, sock, evType) {
   }
 }
 
-module.exports = { processIncomingMessage, rememberRecentMessage, lidToJid }
+module.exports = { processIncomingMessage, rememberRecentMessage, lidToJid, loadAliasesFromDB }

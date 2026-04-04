@@ -56,17 +56,39 @@ async function isAdmin(sock, groupJid, userJid) {
     logger.warn('identity', `[Admin Check] Falha: Grupo ${groupJid} sem meta.participants`)
     return false
   }
-  const baseUserJid = getBaseJid(userJid)
-  const admins = meta.participants.filter(p => !!p.admin).map(p => getBaseJid(p.id))
-  const isMatch = admins.includes(baseUserJid)
-  
-  if (isMatch) {
-    logger.info('identity', `[Admin Check] Match (Sucesso) | Alvo Resolvido: ${baseUserJid} | Encontrado na Lista de Admins do servidor.`)
-  } else {
-    logger.info('identity', `[Admin Check] Block (Recusado) | Alvo Resolvido: ${baseUserJid} | Não consta na Lista de Admins do servidor: [${admins.join(', ')}]`)
+
+  const { resolveIdentity } = require('./identity')
+  const userIdentity = resolveIdentity(userJid)
+  const adminEntries = meta.participants.filter(p => !!p.admin)
+  const adminJids = adminEntries.map(p => getBaseJid(p.id))
+
+  logger.info('identity', [
+    `[Admin Check] Executor raw=${userJid}`,
+    `number=${userIdentity.number}`,
+    `aliases=[${userIdentity.aliases.join(', ')}]`,
+    `admins do grupo=[${adminJids.join(', ')}]`
+  ].join(' | '))
+
+  // Compara qualquer alias do executor contra qualquer JID de admin
+  for (const alias of userIdentity.aliases) {
+    const aliasBase = getBaseJid(alias)
+    if (adminJids.includes(aliasBase)) {
+      logger.info('identity', `[Admin Check] Match (Sucesso) | Alias '${aliasBase}' encontrado no array de admins.`)
+      return true
+    }
+    // Compara por número contra os JIDs de admin (caso os admins venham como @s.whatsapp.net)
+    const aliasNum = String(alias).replace(/\D/g, '').replace(/@.*$/, '')
+    if (aliasNum.length >= 8) {
+      const matchedByNum = adminJids.find(aJid => aJid.startsWith(aliasNum + '@') || aJid === aliasNum)
+      if (matchedByNum) {
+        logger.info('identity', `[Admin Check] Match por número (Sucesso) | ${aliasNum} → ${matchedByNum}`)
+        return true
+      }
+    }
   }
 
-  return isMatch
+  logger.info('identity', `[Admin Check] Block (Recusado) | Aliases [${userIdentity.aliases.join(', ')}] não constam nos admins.`)
+  return false
 }
 
 module.exports = {
