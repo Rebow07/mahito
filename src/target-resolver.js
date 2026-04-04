@@ -1,28 +1,39 @@
 /**
  * src/target-resolver.js
  *
- * Resolvedor central de alvos para todos os comandos do Mahito.
+ * Resolvedor central e único de alvos/pessoas para TODOS os comandos e mensagens do Mahito.
  *
- * Problema que resolve:
- *  - Em grupos LID-mode, participantes têm JIDs @lid mas comandos montavam
- *    @s.whatsapp.net ou número cru na mão, gerando rejeição na Evolution API.
- *  - Cada comando tinha sua própria lógica de extração (inconsistente).
+ * Arquitetura de 4 camadas — uma resolução rica, reutilizada em tudo:
  *
- * Solução:
- *  1. Extração de alvo bruto da mensagem (mention / reply / @digitos no texto)
- *  2. Casamento com participante real do grupo (a origem mais confiável)
- *  3. Fallback via cache/DB de identidade canônica
- *  4. Escolha do preferredId conforme contexto (group_action vs profile_lookup)
+ *  1. TARGET ACTION      → preferredActionId  (ban, promover, rebaixar — JID real do grupo)
+ *  2. DISPLAY IDENTITY   → displayName        (nome mais humano disponível)
+ *  3. PERSISTENCE KEY    → persistenceKey     (chave canônica para users_data)
+ *  4. MENTION TARGET     → preferredMentionId (JID para o array mentions[])
+ *
+ * Regra principal: participantMatch é FONTE DE VERDADE.
+ *  - Quando encontrado, alimenta action, displayName, persistenceKey e mention.
+ *  - Não fica só no log.
  *
  * Contextos:
- *  group_action    - ban, promover, rebaixar, aviso → usa JID real do participante
- *  profile_lookup  - perfil, conquistas, XP        → usa identidade canônica
- *  permission_check - isAdmin, isOwner             → usa identidade canônica
+ *  group_action     - ban, promover, rebaixar, aviso → usa JID real do participante
+ *  profile_lookup   - perfil, conquistas, XP         → usa identidade canônica
+ *  permission_check - isAdmin, isOwner               → usa identidade canônica
+ *
+ * Helpers de consumo (use estes nos comandos/mensagens):
+ *  getBestDisplayName(resolution)   → nome mais humano, nunca string técnica
+ *  getPreferredActionId(resolution) → JID correto para ações de grupo
+ *  getPreferredMentionId(resolution)→ JID correto para array mentions[]
+ *  getPersistenceKey(resolution)    → chave canônica para users_data
  */
 
 const { getBaseJid } = require('./utils')
-const { resolveIdentity } = require('./identity')
+const { resolveIdentity, canonicalUserKey, resolveUser } = require('./identity')
 const logger = require('./logger')
+
+function pickParticipantDisplayName(participant) {
+  if (!participant) return null
+  return participant.notify || participant.pushName || participant.name || participant.subject || null
+}
 
 // ─── Extração de candidatos brutos ───────────────────────────────────────────
 
@@ -83,7 +94,7 @@ function findParticipantMatch(participants, rawInput) {
 
     // 1. JID exato (inclui @lid ou @s.whatsapp.net)
     if (pId === raw) {
-      return { jid: pId, by: 'exact', isAdmin: !!p.admin }
+      return { jid: pId, by: 'exact', isAdmin: !!p.admin, participant: p }
     }
 
     // 2. Dígitos idênticos (LID ou número, sem importar sufixo)
@@ -91,7 +102,7 @@ function findParticipantMatch(participants, rawInput) {
       const by = raw.endsWith('@lid') ? 'lid'
                : raw.endsWith('@s.whatsapp.net') ? 'jid'
                : 'digits'
-      return { jid: pId, by, isAdmin: !!p.admin }
+      return { jid: pId, by, isAdmin: !!p.admin, participant: p }
     }
 
     // 3. Sufixo numérico — lida com dígito 9 opcional em números brasileiros
@@ -101,7 +112,7 @@ function findParticipantMatch(participants, rawInput) {
       const tailRaw = rawDigits.slice(-minLen)
       const tailP   = pDigits.slice(-minLen)
       if (tailRaw === tailP) {
-        return { jid: pId, by: 'number_suffix', isAdmin: !!p.admin }
+        return { jid: pId, by: 'number_suffix', isAdmin: !!p.admin, participant: p }
       }
     }
   }
@@ -131,21 +142,23 @@ function findParticipantMatch(participants, rawInput) {
  * @property {string|null}   normalizedNumber
  * @property {string|null}   primaryJid
  * @property {string|null}   lid
- * @property {string}        preferredId     ID final correto para o contexto
+ * @property {string}        preferredId        ID final correto para o contexto
+ * @property {string}        preferredActionId  ID correto para ações de grupo
+ * @property {string}        preferredMentionId ID correto para mentions[]
  * @property {string|null}   displayName     Nome humano mais rico disponível (pushName, número formatado ou null)
  * @property {string}        displaySource   Origem do displayName: 'pushName' | 'number' | 'none'
  * @property {string[]}      aliases
  * @property {{ matched: boolean, jid?: string, by?: string }} participantMatch
  */
-function resolveTargetIdentity({ msg, text, groupMetadata, context = 'group_action', cmd = '' }) {
+function resolveTargetIdentity({ msg, text, groupMetadata, groupJid = null, context = 'group_action', cmd = '' }) {
   const rawTargets = extractRawTargetsFromMessage(msg, text)
   if (!rawTargets.length) return []
 
   const participants = groupMetadata?.participants || []
-  return rawTargets.map(rt => _resolveSingle(rt, participants, context, cmd))
+  return rawTargets.map(rt => _resolveSingle(rt, participants, groupJid, context, cmd))
 }
 
-function _resolveSingle(rawTarget, participants, context, cmd) {
+function _resolveSingle(rawTarget, participants, groupJid, context, cmd) {
   const rawInput   = rawTarget.raw
   const rawDigits  = rawTarget.digits || rawInput.replace(/\D/g, '')
 
@@ -176,45 +189,75 @@ function _resolveSingle(rawTarget, participants, context, cmd) {
   const resolvedLid = identity.lid
     || (match?.jid?.endsWith('@lid') ? match.jid : null)
 
-  // ── Passo 3: Escolher preferredId conforme contexto ──────────────────────
-  let preferredId
+  // ── Passo 3: Separar actionId, mentionId e persistenceKey ─────────────────
+  const fallbackJid = rawDigits ? `${rawDigits}@s.whatsapp.net` : rawInput
 
-  if (context === 'group_action') {
-    // Para ban/promover/rebaixar: participante real do grupo > lid > jid > fallback
-    preferredId = match?.jid
-               || resolvedLid
-               || identity.primaryJid
-               || (rawDigits ? `${rawDigits}@s.whatsapp.net` : rawInput)
-  } else {
-    // Para perfil/permissão: identidade canônica > participante > fallback
-    preferredId = identity.primaryJid
-               || resolvedLid
-               || match?.jid
-               || (rawDigits ? `${rawDigits}@s.whatsapp.net` : rawInput)
-  }
+  const preferredActionId = match?.jid
+    || resolvedLid
+    || identity.primaryJid
+    || fallbackJid
 
-  // persistenceKey: chave canônica que será usada em users_data para este alvo
-  let persistenceKey = preferredId
-  try {
-    const { canonicalUserKey } = require('./identity')
-    persistenceKey = canonicalUserKey(preferredId)
-  } catch { /* identity não disponível */ }
+  const preferredMentionId = match?.jid
+    || preferredActionId
+    || resolvedLid
+    || identity.primaryJid
+    || fallbackJid
+
+  const persistenceSeed = match?.jid
+    || identity.primaryJid
+    || identity.number
+    || resolvedLid
+    || fallbackJid
+
+  const preferredId = context === 'group_action'
+    ? preferredActionId
+    : (match?.jid || identity.primaryJid || resolvedLid || fallbackJid)
+  const persistenceKey = canonicalUserKey(persistenceSeed)
 
   // ── Passo 4: Resolver nome de exibição mais humano possível ─────────────
   let displayName = null
   let displaySource = 'none'
-  try {
-    const { resolveUser } = require('./identity')
-    const candidate = resolveUser(preferredId, null)
-    // Se não caiu no fallback genérico, aceita
-    if (candidate && !candidate.startsWith('[Oculto:') && candidate !== preferredId) {
-      displayName = candidate
-      displaySource = identity.pushName ? 'pushName' : 'number'
-    } else if (identity.pushName) {
-      displayName = identity.pushName
-      displaySource = 'pushName'
+
+  const participantDisplayName = pickParticipantDisplayName(match?.participant)
+  if (participantDisplayName) {
+    displayName = participantDisplayName
+    displaySource = 'group_participant'
+  }
+
+  if (!displayName && identity.pushName) {
+    displayName = identity.pushName
+    displaySource = 'pushName'
+  }
+
+  const displayCandidates = [
+    match?.jid,
+    preferredMentionId,
+    preferredActionId,
+    identity.primaryJid,
+    resolvedLid,
+    persistenceKey,
+    fallbackJid
+  ].filter(Boolean)
+
+  if (!displayName) {
+    for (const candidateJid of displayCandidates) {
+      const candidate = resolveUser(candidateJid, groupJid)
+      if (candidate && !candidate.startsWith('[Oculto:') && candidate !== candidateJid) {
+        displayName = candidate
+        displaySource = candidateJid === match?.jid ? 'participant_match'
+          : candidateJid === identity.primaryJid ? 'primary_jid'
+          : candidateJid === persistenceKey ? 'persistence_key'
+          : candidateJid === resolvedLid ? 'lid'
+          : 'resolved'
+        break
+      }
     }
-  } catch { /* silencioso */ }
+  }
+
+  if (!displayName && rawDigits) {
+    displayName = `[Oculto: ${rawDigits}]`
+    displaySource = 'last_resort_fallback'
+  }
 
   const resolution = {
     rawInput,
@@ -225,6 +268,8 @@ function _resolveSingle(rawTarget, participants, context, cmd) {
     primaryJid: identity.primaryJid,
     lid: resolvedLid,
     preferredId,
+    preferredActionId,
+    preferredMentionId,
     persistenceKey,
     displayName,
     displaySource,
@@ -245,7 +290,11 @@ function _resolveSingle(rawTarget, participants, context, cmd) {
     `aliases=[${resolution.aliases.join(',')}]`,
     `participantMatch=${match ? match.jid + ' by=' + match.by : 'false'}`,
     `preferredId=${preferredId}`,
+    `actionId=${preferredActionId}`,
+    `mentionId=${preferredMentionId}`,
     `persistenceKey=${persistenceKey}`,
+    `displayName=${displayName}`,
+    `displaySource=${displaySource}`,
     `source=${rawTarget.source}`
   ].filter(Boolean).join(' | '))
 
@@ -254,17 +303,35 @@ function _resolveSingle(rawTarget, participants, context, cmd) {
 
 // ─── Helpers de conveniência ─────────────────────────────────────────────────
 
-/**
- * Extrai apenas os preferredIds de uma lista de resoluções.
- * Atalho para o padrão `for (const jid of getPreferredIds(targets))` nos comandos.
- */
 function getPreferredIds(resolutions) {
   return resolutions.map(r => r.preferredId).filter(Boolean)
+}
+
+function getPreferredActionId(resolution) {
+  return resolution?.preferredActionId || resolution?.preferredId || null
+}
+
+function getPreferredMentionId(resolution) {
+  return resolution?.preferredMentionId || resolution?.preferredActionId || resolution?.preferredId || null
+}
+
+function getBestDisplayName(resolution, fallbackJid = null, groupJid = null) {
+  if (resolution?.displayName) return resolution.displayName
+  if (fallbackJid) return resolveUser(fallbackJid, groupJid)
+  return '[Oculto]'
+}
+
+function getPersistenceKey(resolution) {
+  return resolution?.persistenceKey || null
 }
 
 module.exports = {
   extractRawTargetsFromMessage,
   findParticipantMatch,
   resolveTargetIdentity,
-  getPreferredIds
+  getPreferredIds,
+  getPreferredActionId,
+  getPreferredMentionId,
+  getBestDisplayName,
+  getPersistenceKey
 }

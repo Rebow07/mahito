@@ -188,6 +188,19 @@ function resolveUser(jid, groupId = null) {
     if (id.primaryJid || id.number) {
       return resolveUser(id.primaryJid || `${id.number}@s.whatsapp.net`, groupId)
     }
+
+    // Tenta aproveitar dados persistidos do grupo usando a chave canônica
+    try {
+      const { getUserData } = require('./db')
+      if (groupId) {
+        const canonical = canonicalUserKey(baseUserJid)
+        const userData = getUserData(canonical, getBaseJid(groupId))
+        if (userData?.push_name && userData.push_name.trim().length > 0) {
+          return `${userData.push_name.trim()} (LID)`
+        }
+      }
+    } catch { /* silencioso */ }
+
     // pushName conhecido mas sem número/JID — exibe nome com indicador LID
     if (id.pushName && id.pushName.trim().length > 0) {
       return `${id.pushName.trim()} (LID)`

@@ -24,7 +24,7 @@ const { safeDelete, safeRemove, safePromote, safeDemote, safeUpdateGroupSetting,
 const transport = require('./transport/whatsapp')
 const { getGroupName, getGroupMeta, isAdmin } = require('./group')
 const { resolveUser, resolveGroup } = require('./identity')
-const { resolveTargetIdentity, getPreferredIds } = require('./target-resolver')
+const { resolveTargetIdentity, getPreferredIds, getPreferredActionId, getPreferredMentionId, getBestDisplayName, getPersistenceKey } = require('./target-resolver')
 const { sendStrikeWarning } = require('./moderation')
 const { enviarReacaoMahito } = require('./reactions')
 const { formatAchievementList, TOTAL_ACHIEVEMENTS } = require('./achievements')
@@ -1508,7 +1508,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     // Alias curto para resolveTargetIdentity com contexto preenchido
     const resolveTargets = async (context) => {
       const meta = await getGroupMetaLazy()
-      return resolveTargetIdentity({ msg, text, groupMetadata: meta, context, cmd })
+      return resolveTargetIdentity({ msg, text, groupMetadata: meta, groupJid, context, cmd })
     }
 
     // ─── !fadm / !fechar ───
@@ -1695,7 +1695,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     }
     const levelNames = { 0: 'Membro', 1: 'VIP', 2: 'Mod', 3: 'Dono' }
     for (const resolution of targets) {
-      const jid = resolution.preferredId
+      const jid = getPreferredActionId(resolution)
       logger.info('commands', `[!] Processando promoção | Alvo: ${jid} | Nível: ${level}`)
       setPermLevel(jid, groupJid, level)
       if (level >= 1) {
@@ -1720,7 +1720,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     }
     const targets = await resolveTargets('group_action')
     for (const resolution of targets) {
-      const jid = resolution.preferredId
+      const jid = getPreferredActionId(resolution)
       logger.info('commands', `[!] Processando rebaixamento | Alvo: ${jid}`)
       setPermLevel(jid, groupJid, 0)
       await safeDemote(sock, groupJid, jid)
@@ -1983,12 +1983,14 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
       return true
     }
     for (const resolution of targets) {
-      const jid = resolution.preferredId
+      const jid = getPreferredActionId(resolution)
+      const mentionJid = getPreferredMentionId(resolution) || jid
+      const displayName = getBestDisplayName(resolution, mentionJid, groupJid)
       try {
         logger.info('commands', `[!] Processando banimento | Alvo: ${jid}`)
         await safeRemove(sock, groupJid, jid)
-        resetStrikesDB(jid, groupJid)
-        await safeSendMessage(sock, groupJid, { text: `💀 ${resolveUser(jid, groupJid)} caiu...`, mentions: [jid] })
+        resetStrikesDB(getPersistenceKey(resolution) || jid, groupJid)
+        await safeSendMessage(sock, groupJid, { text: `💀 ${displayName} caiu...`, mentions: [mentionJid] })
       } catch (err) {
         logger.error('commands', `[!] !ban falhou localmente | Alvo: ${jid} | Motivo: ${err.message}`)
         await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
@@ -2003,10 +2005,11 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     if (!targets.length) { await safeSendMessage(sock, groupJid, { text: 'Marque alguem.' }); return true }
     const gc = getGroupConfig(groupJid)
     for (const resolution of targets) {
-      const jid = resolution.preferredId
-      const count = addStrikeDB(jid, groupJid)
-      await sendStrikeWarning(sock, groupJid, jid, count, gc.max_penalties, 'aviso manual')
-      if (count >= gc.max_penalties) { await safeRemove(sock, groupJid, jid); resetStrikesDB(jid, groupJid) }
+      const jid = getPreferredActionId(resolution)
+      const dataKey = getPersistenceKey(resolution) || jid
+      const count = addStrikeDB(dataKey, groupJid)
+      await sendStrikeWarning(sock, groupJid, getPreferredMentionId(resolution) || jid, count, gc.max_penalties, 'aviso manual')
+      if (count >= gc.max_penalties) { await safeRemove(sock, groupJid, jid); resetStrikesDB(dataKey, groupJid) }
     }
     return true
   }
@@ -2015,7 +2018,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
   if (cmd === '!reset') {
     const targets = await resolveTargets('group_action')
     if (!targets.length) { await safeSendMessage(sock, groupJid, { text: 'Marque alguém.' }); return true }
-    for (const resolution of targets) resetStrikesDB(resolution.preferredId, groupJid)
+    for (const resolution of targets) resetStrikesDB(getPersistenceKey(resolution) || resolution.preferredId, groupJid)
     await safeSendMessage(sock, groupJid, { text: '✅ Strikes resetados.' })
     return true
   }
@@ -2108,9 +2111,10 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     const filteredTargets = profileTargets.filter(r => r.preferredId !== botJid)
 
     const targetResolution = filteredTargets.length > 0 ? filteredTargets[0] : null
-    let targetJid = targetResolution ? targetResolution.preferredId : userJid
+    const mentionJid = targetResolution ? getPreferredMentionId(targetResolution) : userJid
+    const targetDataKey = targetResolution ? (getPersistenceKey(targetResolution) || mentionJid) : userJid
 
-    const data = getUserData(targetJid, groupJid)
+    const data = getUserData(targetDataKey, groupJid)
     const levels = { 0: 'Membro', 1: 'VIP', 2: 'Mod', 3: 'Dono' }
     const nextLevelXP = (data.level + 1) * XP_PER_LEVEL
     const achievementCount = countAchievements(targetJid, groupJid)
@@ -2119,15 +2123,15 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     
     // Auto-detect role: Owner > Admin > DB perm_level
     const { isOwner } = require('./config')
-    const targetIsOwner = isOwner(targetJid, config)
-    const targetIsAdmin = await isAdmin(sock, groupJid, targetJid)
+    const targetIsOwner = isOwner(mentionJid, config)
+    const targetIsAdmin = await isAdmin(sock, groupJid, mentionJid)
     let cargo = levels[data.perm_level] || 'Membro'
     if (targetIsOwner) cargo = '👑 Dono'
     else if (targetIsAdmin) cargo = '🛡️ Admin'
     else if (data.perm_level >= 1) cargo = levels[data.perm_level]
     
     // Prioridade: displayName da resolução > resolveUser (com pushName) > fallback
-    const resolvedName = (targetResolution?.displayName) || resolveUser(targetJid, groupJid)
+    const resolvedName = getBestDisplayName(targetResolution, mentionJid, groupJid)
 
     const card =
       `┌──────────────────────┐\n` +
@@ -2143,7 +2147,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
       `│  🎯 Próximo nível: ${nextLevelXP - data.xp} XP\n` +
       `└──────────────────────┘`
 
-    await safeSendMessage(sock, groupJid, { text: card, mentions: [targetJid] })
+    await safeSendMessage(sock, groupJid, { text: card, mentions: [mentionJid] })
     return true
   }
 
@@ -2151,13 +2155,14 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
   if (cmd === '!conquistas') {
     const conquTargets = await resolveTargets('profile_lookup')
     const conquResolution = conquTargets.length > 0 ? conquTargets[0] : null
-    const targetJid = conquResolution ? conquResolution.preferredId : userJid
-    const list = formatAchievementList(targetJid, groupJid)
-    const count = countAchievements(targetJid, groupJid)
-    const resolvedName = conquResolution?.displayName || resolveUser(targetJid, groupJid)
+    const mentionJid = conquResolution ? getPreferredMentionId(conquResolution) : userJid
+    const targetDataKey = conquResolution ? (getPersistenceKey(conquResolution) || mentionJid) : userJid
+    const list = formatAchievementList(targetDataKey, groupJid)
+    const count = countAchievements(targetDataKey, groupJid)
+    const resolvedName = getBestDisplayName(conquResolution, mentionJid, groupJid)
     await safeSendMessage(sock, groupJid, {
       text: `🏆 *Conquistas de ${resolvedName}* (${count}/${TOTAL_ACHIEVEMENTS})\n\n${list}`,
-      mentions: [targetJid]
+      mentions: [mentionJid]
     })
     return true
   }
