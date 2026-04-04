@@ -146,8 +146,10 @@ async function updateParticipant(groupJid, action, participants = [], instance) 
       action,
       participants: parsedParticipants
     }
-    // Evolution v2: POST /group/updateParticipant/{instance}?groupJid=<groupJid>
-    await buildClient(cfg).post(`/group/updateParticipant/${inst}?groupJid=${groupJid}`, payload)
+    logger.info('evolution', `[Endpoint] POST /group/updateParticipant/${inst}?groupJid=${groupJid}`)
+    logger.info('evolution', `[Payload] ${JSON.stringify(payload)}`)
+    const { data } = await buildClient(cfg).post(`/group/updateParticipant/${inst}?groupJid=${groupJid}`, payload)
+    logger.info('evolution', `[Resposta] HTTP 200 OK | Body: ${JSON.stringify(data).substring(0, 150)}`)
     return true
   } catch (err) {
     logger.error('evolution', `updateParticipant (${action}) falhou: ${err.response?.data?.message || err.message}`)
@@ -162,8 +164,10 @@ async function updateGroupSetting(groupJid, action, instance) {
   
   try {
     const payload = { action }
-    // Evolution v2: POST /group/updateSetting/{instance}?groupJid=<groupJid>
-    await buildClient(cfg).post(`/group/updateSetting/${inst}?groupJid=${groupJid}`, payload)
+    logger.info('evolution', `[Endpoint] POST /group/updateSetting/${inst}?groupJid=${groupJid}`)
+    logger.info('evolution', `[Payload] ${JSON.stringify(payload)}`)
+    const { data } = await buildClient(cfg).post(`/group/updateSetting/${inst}?groupJid=${groupJid}`, payload)
+    logger.info('evolution', `[Resposta] HTTP 200 OK | Body: ${JSON.stringify(data).substring(0, 150)}`)
     return true
   } catch (err) {
     logger.error('evolution', `updateGroupSetting (${action}) falhou: ${err.response?.data?.message || err.message}`)

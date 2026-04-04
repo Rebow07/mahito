@@ -95,82 +95,107 @@ async function safeDelete(sock, groupJid, key, participant) {
 
 async function safeRemove(sock, groupJid, userJid) {
   const processEvolution = async () => {
-    logger.info('queue', `Removendo ${userJid} via Evolution API`)
+    logger.info('queue', `[Provider] Evolution API acionada para REMOVE | Alvo: ${userJid} | Grupo: ${groupJid}`)
     const evolution = require('./evolution')
     return await evolution.updateParticipant(groupJid, 'remove', [userJid])
   }
 
   if (!sock) {
+    logger.info('queue', `[Provider] Evolution-Only. Não há fallback Baileys disponível.`)
     const success = await processEvolution()
-    if (!success) logger.warn('queue', `Falha ao remover ${userJid} no modo Evolution.`)
+    if (!success) logger.warn('queue', `[Resultado] Falha ao remover ${userJid} via Evolution-Only.`)
+    else logger.info('queue', `[Resultado] Sucesso na Evolution API.`)
     return
   }
 
   if (process.env.ENABLE_EVOLUTION === 'true') {
+     logger.info('queue', `[Provider] Híbrido. Tentativa Evolution primeiro...`)
      const success = await processEvolution()
-     if (success) return
+     if (success) {
+         logger.info('queue', `[Resultado] Sucesso na Evolution API.`)
+         return
+     }
+     logger.warn('queue', `[Fallback] Evolution falhou. Acionando fallback Baileys...`)
   }
 
   try {
+    logger.info('queue', `[Provider] Baileys | Payload: { grupo: ${groupJid}, method: groupParticipantsUpdate, acao: 'remove', alvo: ${userJid} }`)
     await enqueueWA(`remove:${groupJid}:${userJid}`, () => sock.groupParticipantsUpdate(groupJid, [userJid], 'remove'), DELAYS.remove, true)
-  } catch {}
+  } catch (err) {
+    logger.error('queue', `[Resultado] Baileys Falhou | Motivo: ${err.message}`)
+  }
 }
 
 async function safePromote(sock, groupJid, userJid) {
   const processEvolution = async () => {
-    logger.info('queue', `Promovendo ${userJid} via Evolution API`)
+    logger.info('queue', `[Provider] Evolution API acionada para PROMOTE | Alvo: ${userJid} | Grupo: ${groupJid}`)
     const evolution = require('./evolution')
     return await evolution.updateParticipant(groupJid, 'promote', [userJid])
   }
   if (!sock) {
-    await processEvolution()
+    const success = await processEvolution()
+    if (!success) logger.warn('queue', `[Resultado] Falha no PROMOTE via Evolution-Only.`)
     return
   }
   if (process.env.ENABLE_EVOLUTION === 'true') {
      const success = await processEvolution()
      if (success) return
+     logger.warn('queue', `[Fallback] PROMOTE Evolution falhou. Acionando Baileys...`)
   }
   try {
+    logger.info('queue', `[Provider] Baileys | Ação: PROMOTE | Alvo: ${userJid}`)
     await enqueueWA(`promote:${groupJid}:${userJid}`, () => sock.groupParticipantsUpdate(groupJid, [userJid], 'promote'), 1500, true)
-  } catch {}
+  } catch (err) {
+    logger.error('queue', `[Resultado] Baileys PROMOTE Falhou | Motivo: ${err.message}`)
+  }
 }
 
 async function safeDemote(sock, groupJid, userJid) {
   const processEvolution = async () => {
-    logger.info('queue', `Rebaixando ${userJid} via Evolution API`)
+    logger.info('queue', `[Provider] Evolution API acionada para DEMOTE | Alvo: ${userJid} | Grupo: ${groupJid}`)
     const evolution = require('./evolution')
     return await evolution.updateParticipant(groupJid, 'demote', [userJid])
   }
   if (!sock) {
-    await processEvolution()
+    const success = await processEvolution()
+    if (!success) logger.warn('queue', `[Resultado] Falha no DEMOTE via Evolution-Only.`)
     return
   }
   if (process.env.ENABLE_EVOLUTION === 'true') {
      const success = await processEvolution()
      if (success) return
+     logger.warn('queue', `[Fallback] DEMOTE Evolution falhou. Acionando Baileys...`)
   }
   try {
+    logger.info('queue', `[Provider] Baileys | Ação: DEMOTE | Alvo: ${userJid}`)
     await enqueueWA(`demote:${groupJid}:${userJid}`, () => sock.groupParticipantsUpdate(groupJid, [userJid], 'demote'), 1500, true)
-  } catch {}
+  } catch (err) {
+    logger.error('queue', `[Resultado] Baileys DEMOTE Falhou | Motivo: ${err.message}`)
+  }
 }
 
 async function safeUpdateGroupSetting(sock, groupJid, action) {
   const processEvolution = async () => {
-    logger.info('queue', `Group Setting ${action} via Evolution API`)
+    logger.info('queue', `[Provider] Evolution API acionada para GROUP SETTING | Ação: ${action} | Grupo: ${groupJid}`)
     const evolution = require('./evolution')
     return await evolution.updateGroupSetting(groupJid, action)
   }
   if (!sock) {
-    await processEvolution()
+    const success = await processEvolution()
+    if (!success) logger.warn('queue', `[Resultado] Falha no GROUP SETTING via Evolution-Only.`)
     return
   }
   if (process.env.ENABLE_EVOLUTION === 'true') {
      const success = await processEvolution()
      if (success) return
+     logger.warn('queue', `[Fallback] GROUP SETTING Evolution falhou. Acionando Baileys...`)
   }
   try {
+    logger.info('queue', `[Provider] Baileys | Ação: GROUP SETTING ${action}`)
     await enqueueWA(`settings:${groupJid}`, () => sock.groupSettingUpdate(groupJid, action), 2000, true)
-  } catch {}
+  } catch (err) {
+    logger.error('queue', `[Resultado] Baileys GROUP SETTING Falhou | Motivo: ${err.message}`)
+  }
 }
 
 let discordDisabled = false

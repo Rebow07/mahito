@@ -1415,11 +1415,16 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     
     // ─── !fadm / !fechar ───
     if (cmd === '!fadm' || cmd === '!fechar') {
-      if (!admin && !isBotOwner) return true
+      logger.info('commands', `[!] !fechar acionado | Executor: ${userJid} | Grupo: ${groupJid}`)
+      if (!admin && !isBotOwner) {
+        logger.warn('commands', `[!] !fechar bloqueado | Executor não é admin/owner`)
+        return true
+      }
       try {
         await safeUpdateGroupSetting(sock, groupJid, 'announcement')
         await safeSendMessage(sock, groupJid, { text: '🔒 Grupo fechado. Apenas administradores podem enviar mensagens.' })
-      } catch {
+      } catch (err) {
+        logger.error('commands', `[!] !fechar falhou | Motivo: ${err.message}`)
         await safeSendMessage(sock, groupJid, { text: '❌ Erro: Certifique-se de que o bot é admin.' })
       }
       return true
@@ -1427,11 +1432,16 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
 
     // ─── !abrir ───
     if (cmd === '!abrir') {
-      if (!admin && !isBotOwner) return true
+      logger.info('commands', `[!] !abrir acionado | Executor: ${userJid} | Grupo: ${groupJid}`)
+      if (!admin && !isBotOwner) {
+        logger.warn('commands', `[!] !abrir bloqueado | Executor não é admin/owner`)
+        return true
+      }
       try {
         await safeUpdateGroupSetting(sock, groupJid, 'not_announcement')
         await safeSendMessage(sock, groupJid, { text: '🔓 Grupo aberto para todos os membros.' })
-      } catch {
+      } catch (err) {
+        logger.error('commands', `[!] !abrir falhou | Motivo: ${err.message}`)
         await safeSendMessage(sock, groupJid, { text: '❌ Erro: Certifique-se de que o bot é admin.' })
       }
       return true
@@ -1573,8 +1583,10 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
 
   // ─── !promover @user nivel ───
   if (cmd === '!promover') {
+    logger.info('commands', `[!] !promover acionado | Executor: ${userJid} | Grupo: ${groupJid}`)
     const { isOwner } = require('./config')
     if (!isOwner(userJid, config)) {
+      logger.warn('commands', `[!] !promover bloqueado | Executor não é Owner no config`)
       await safeSendMessage(sock, groupJid, { text: '❌ Apenas o Dono (nível 3) pode promover.' })
       return true
     }
@@ -1587,6 +1599,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     }
     const levelNames = { 0: 'Membro', 1: 'VIP', 2: 'Mod', 3: 'Dono' }
     for (const jid of mentioned) {
+      logger.info('commands', `[!] Processando promoção | Alvo: ${jid} | Nível: ${level}`)
       setPermLevel(jid, groupJid, level)
       if (level >= 1) {
         await safePromote(sock, groupJid, jid)
@@ -1602,14 +1615,17 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
 
   // ─── !rebaixar @user ───
   if (cmd === '!rebaixar') {
+    logger.info('commands', `[!] !rebaixar acionado | Executor: ${userJid} | Grupo: ${groupJid}`)
     const { isOwner } = require('./config')
     if (!isOwner(userJid, config)) {
+      logger.warn('commands', `[!] !rebaixar bloqueado | Executor não é Owner`)
       await safeSendMessage(sock, groupJid, { text: '❌ Apenas o Dono pode rebaixar.' })
       return true
     }
     const mentionedRaw = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || []
     const mentioned = mentionedRaw.map(j => getBaseJid(j))
     for (const jid of mentioned) {
+      logger.info('commands', `[!] Processando rebaixamento | Alvo: ${jid}`)
       setPermLevel(jid, groupJid, 0)
       await safeDemote(sock, groupJid, jid)
       await safeSendMessage(sock, groupJid, { text: `📉 ${resolveUser(jid, groupJid)} voltou ao nível 0 (Membro)`, mentions: [jid] })
@@ -1815,15 +1831,22 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
 
   // ─── !ban ───
   if (cmd === '!ban') {
+    logger.info('commands', `[!] !ban acionado | Executor: ${userJid} | Grupo: ${groupJid}`)
     const mentionedRaw = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || []
     const mentioned = mentionedRaw.map(j => getBaseJid(j))
-    if (!mentioned.length) { await safeSendMessage(sock, groupJid, { text: 'Marque alguém. Ex: !ban @user' }); return true }
+    if (!mentioned.length) { 
+      logger.warn('commands', `[!] !ban sem marcação`)
+      await safeSendMessage(sock, groupJid, { text: 'Marque alguém. Ex: !ban @user' }); 
+      return true 
+    }
     for (const jid of mentioned) {
       try {
+        logger.info('commands', `[!] Processando banimento | Alvo: ${jid}`)
         await safeRemove(sock, groupJid, jid)
         resetStrikesDB(jid, groupJid)
         await safeSendMessage(sock, groupJid, { text: `💀 ${resolveUser(jid, groupJid)} caiu...`, mentions: [jid] })
-      } catch {
+      } catch (err) {
+        logger.error('commands', `[!] !ban falhou localmente | Alvo: ${jid} | Motivo: ${err.message}`)
         await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
       }
     }
