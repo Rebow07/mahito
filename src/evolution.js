@@ -41,15 +41,23 @@ function toNumber(input) {
 
 // ─── Funções de envio ─────────────────────────────────────────────────────────
 
-async function sendText(numberOrJid, text, instance) {
+async function sendText(numberOrJid, text, instance, mentions = []) {
   let cfg
   try { cfg = assertReady() } catch (err) { logger.warn('evolution', err.message); return null }
   const inst = instance || cfg.instance
   try {
-    const { data } = await buildClient(cfg).post(`/message/sendText/${inst}`, {
+    const payload = {
       number: toNumber(numberOrJid),
       text
-    })
+    }
+    // Evolution API aceita mentions via property root ou options. Vamos passar options: { mentions }
+    // e mentioned array duplo pra garantir nas variações da API
+    if (mentions && mentions.length > 0) {
+      payload.mentioned = mentions
+      payload.options = { mentions }
+    }
+
+    const { data } = await buildClient(cfg).post(`/message/sendText/${inst}`, payload)
     return data
   } catch (err) {
     logger.error('evolution', `sendText falhou: ${err.response?.data?.message || err.message}`)
@@ -112,4 +120,58 @@ async function sendReaction(numberOrJid, messageId, reaction, instance) {
   }
 }
 
-module.exports = { sendText, sendMedia, sendSticker, sendReaction }
+async function fetchGroupMeta(groupJid, instance) {
+  let cfg
+  try { cfg = assertReady() } catch (err) { return null }
+  const inst = instance || cfg.instance
+  try {
+    // /group/findGroupInfos/{instance}?groupJid=...
+    const { data } = await buildClient(cfg).get(`/group/findGroupInfos/${inst}?groupJid=${groupJid}`)
+    return data
+  } catch (err) {
+    logger.error('evolution', `fetchGroupMeta falhou para ${groupJid}: ${err.response?.data?.message || err.message}`)
+    return null
+  }
+}
+
+async function updateParticipant(groupJid, action, participants = [], instance) {
+  let cfg
+  try { cfg = assertReady() } catch (err) { return false }
+  const inst = instance || cfg.instance
+  
+  const parsedParticipants = participants.map(p => String(p).replace(/@s\.whatsapp\.net$/, ''))
+  
+  try {
+    const payload = {
+      action,
+      participants: parsedParticipants
+    }
+    // Evolution v2: POST /group/updateParticipant/{instance}?groupJid=<groupJid>
+    await buildClient(cfg).post(`/group/updateParticipant/${inst}?groupJid=${groupJid}`, payload)
+    return true
+  } catch (err) {
+    logger.error('evolution', `updateParticipant (${action}) falhou: ${err.response?.data?.message || err.message}`)
+    return false
+  }
+}
+
+async function updateGroupSetting(groupJid, action, instance) {
+  let cfg
+  try { cfg = assertReady() } catch (err) { return false }
+  const inst = instance || cfg.instance
+  
+  try {
+    const payload = { action }
+    // Evolution v2: POST /group/updateSetting/{instance}?groupJid=<groupJid>
+    await buildClient(cfg).post(`/group/updateSetting/${inst}?groupJid=${groupJid}`, payload)
+    return true
+  } catch (err) {
+    logger.error('evolution', `updateGroupSetting (${action}) falhou: ${err.response?.data?.message || err.message}`)
+    return false
+  }
+}
+
+module.exports = { 
+  sendText, sendMedia, sendSticker, sendReaction, 
+  fetchGroupMeta, updateParticipant, updateGroupSetting 
+}

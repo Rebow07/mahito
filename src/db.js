@@ -282,7 +282,8 @@ function initTables() {
     'ALTER TABLE users_data ADD COLUMN last_message_at INTEGER DEFAULT 0',
     'ALTER TABLE users_data ADD COLUMN total_messages INTEGER DEFAULT 0',
     "ALTER TABLE groups_config ADD COLUMN persona_id TEXT DEFAULT 'mahito-padrao'",
-    'ALTER TABLE users_data ADD COLUMN last_xp_at TEXT'
+    'ALTER TABLE users_data ADD COLUMN last_xp_at TEXT',
+    'ALTER TABLE users_data ADD COLUMN push_name TEXT'
   ]
   for (const sql of migrations) {
     try { d.exec(sql) } catch {}
@@ -657,7 +658,7 @@ function getWeeklyStats(groupId) {
 
 // ─── User Activity Tracking ───
 
-function trackUserActivity(userId, groupId) {
+function trackUserActivity(userId, groupId, pushName = '') {
   const d = getDB()
   const uid = getBaseJid(userId)
   const gid = getBaseJid(groupId)
@@ -667,7 +668,13 @@ function trackUserActivity(userId, groupId) {
   if (!row.first_seen) {
     d.prepare('UPDATE users_data SET first_seen = ? WHERE user_id = ? AND group_id = ?').run(now, uid, gid)
   }
-  d.prepare('UPDATE users_data SET last_message_at = ?, total_messages = total_messages + 1 WHERE user_id = ? AND group_id = ?').run(now, uid, gid)
+  
+  // Update last message, total, and optionally push_name
+  if (pushName && pushName.trim().length > 0) {
+    d.prepare('UPDATE users_data SET last_message_at = ?, total_messages = total_messages + 1, push_name = ? WHERE user_id = ? AND group_id = ?').run(now, pushName, uid, gid)
+  } else {
+    d.prepare('UPDATE users_data SET last_message_at = ?, total_messages = total_messages + 1 WHERE user_id = ? AND group_id = ?').run(now, uid, gid)
+  }
 }
 
 function getInactiveMembers(groupId, daysSince) {

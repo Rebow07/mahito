@@ -19,9 +19,10 @@ const {
 } = require('./db')
 const { normalize, onlyDigits, jidToNumber, getBaseJid, extractUrls, sleep, getText } = require('./utils')
 const logger = require('./logger')
-const { safeDelete, safeRemove, sendDiscordLog, enqueueWA } = require('./queue')
+const { safeDelete, safeRemove, safePromote, safeDemote, safeUpdateGroupSetting, sendDiscordLog, enqueueWA } = require('./queue')
 const transport = require('./transport/whatsapp')
 const { getGroupName, getGroupMeta, isAdmin } = require('./group')
+const { resolveUser, resolveGroup } = require('./identity')
 const { sendStrikeWarning } = require('./moderation')
 const { enviarReacaoMahito } = require('./reactions')
 const { formatAchievementList, TOTAL_ACHIEVEMENTS } = require('./achievements')
@@ -132,14 +133,17 @@ async function renderGroupXpDashboard(sock, groupJid, feedbackMsg = '') {
   const { getGroupMeta } = require('./group')
   let meta = null
   try { meta = await getGroupMeta(sock, groupJid) } catch (e) {}
-  const groupName = meta?.subject || 'Grupo Desconhecido'
+  const memberCount = meta?.participants?.length || 0
+  const adminCount = meta?.participants?.filter(p => !!p.admin).length || 0
+  const groupName = await resolveGroup(groupJid, sock)
   const gc = getGroupConfig(groupJid)
   const xc = getGroupXpConfig(groupJid)
   
   let header = feedbackMsg ? `${feedbackMsg}\n\n` : ''
   return header + (
     `📊 *Dashboard XP: ${groupName}*\n` +
-    `🆔 ID: ${groupJid}\n\n` +
+    `🆔 ID: ${groupJid}\n` +
+    `👥 Membros: ${memberCount} | 🛡️ Admins: ${adminCount}\n\n` +
     `1️⃣ Ativar/Desativar XP: *[${gc.xp_enabled ? 'ON' : 'OFF'}]*\n` +
     `2️⃣ XP por mensagem: *[${xc.xp_per_message}]*\n` +
     `3️⃣ Cooldown em segundos: *[${xc.xp_cooldown_seconds}s]*\n` +
@@ -155,14 +159,18 @@ async function renderGroupXpDashboard(sock, groupJid, feedbackMsg = '') {
 
 async function renderGroupDashboard(sock, groupJid, feedbackMsg = '') {
   const gc = getGroupConfig(groupJid)
-  const meta = await getGroupMeta(sock, groupJid)
-  const groupName = meta?.subject || 'Grupo Desconhecido'
+  const groupName = await resolveGroup(groupJid, sock)
+  let meta = null
+  try { meta = await getGroupMeta(sock, groupJid) } catch (e) {}
+  const memberCount = meta?.participants?.length || 0
+  const adminCount = meta?.participants?.filter(p => !!p.admin).length || 0
   const slowLabel = gc.slow_mode_seconds > 0 ? `${gc.slow_mode_seconds}s` : 'OFF'
 
   let header = feedbackMsg ? `${feedbackMsg}\n\n` : ''
   return header + (
     `📊 *Dashboard: ${groupName}*\n` +
-    `🆔 ID: ${groupJid}\n\n` +
+    `🆔 ID: ${groupJid}\n` +
+    `👥 Membros: ${memberCount} | 🛡️ Admins: ${adminCount}\n\n` +
     `1️⃣ Limite de Strikes: *[${gc.max_penalties}]*\n` +
     `2️⃣ Anti-Link: *[${gc.anti_link_enabled ? 'ON' : 'OFF'}]*\n` +
     `3️⃣ Anti-Spam: *[${gc.anti_spam_enabled ? 'ON' : 'OFF'}]*\n` +
@@ -473,8 +481,12 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
         await safeSendMessage(sock, jid, { text: '❌ Nenhum grupo na lista de autorizados ainda.' })
         return
       }
-      const chats = sock ? await sock.groupFetchAllParticipating() : {}
-      const lines = allowed.map((gJid, i) => `${i + 1}. ${chats[gJid]?.subject || 'Grupo'} (${gJid})`)
+      const lines = []
+      for (let i = 0; i < allowed.length; i++) {
+        const gJid = allowed[i]
+        const name = await resolveGroup(gJid, sock)
+        lines.push(`${i + 1}. ${name} (${gJid})`)
+      }
       state.customerStates[jid].flow = 'menu_group_select'
       state.customerStates[jid].groupsList = allowed
       await safeSendMessage(sock, jid, { text: `🎯 *Selecione o grupo para configurar*:\n\n${lines.join('\n')}\n\n0️⃣ Voltar` })
@@ -567,7 +579,7 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     if (msg === '14') {
       state.customerStates[jid].flow = 'menu_group_perms'
       const mods = getGroupRanking(targetJid, 100).filter(u => u.perm_level >= 1)
-      const lines = mods.map(u => `• @${jidToNumber(u.user_id)} - ${u.perm_level === 2 ? 'MOD ⚔️' : u.perm_level === 1 ? 'VIP ⭐' : 'MEMBRO'}`)
+      const lines = mods.map(u => `• ${resolveUser(u.user_id, targetJid)} - ${u.perm_level === 2 ? 'MOD ⚔️' : u.perm_level === 1 ? 'VIP ⭐' : 'MEMBRO'}`)
       const text = `👥 *Permissões do Grupo*\n\n${lines.join('\n') || 'Nenhum Mod/VIP cadastrado.'}\n\n1️⃣ Promover/Rebaixar Membro\n2️⃣ Remover Todas as Permissões\n0️⃣ Voltar`
       await safeSendMessage(sock, jid, { text, mentions: mods.map(u => u.user_id) })
       return
@@ -641,7 +653,7 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
          await safeSendMessage(sock, jid, { text: '🏆 Ranking vazio atualmente.' })
          return
       }
-      const lines = ranking.map((r, i) => `${i+1}. @${jidToNumber(r.user_id)} - Nível ${r.level} (${r.xp} XP)`)
+      const lines = ranking.map((r, i) => `${i+1}. ${resolveUser(r.user_id, targetJid)} - Nível ${r.level} (${r.xp} XP)`)
       await safeSendMessage(sock, jid, { text: `🏆 *Ranking Top 10*\n\n${lines.join('\n')}`, mentions: ranking.map(r => r.user_id) })
       return
     }
@@ -700,7 +712,7 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
     if (num && lvl) {
       const targetJid = jidToNumber(num) + '@s.whatsapp.net'
       setPermLevel(targetJid, sc.selectedGroupJid, parseInt(lvl))
-      fb = `✅ Permissão de @${jidToNumber(targetJid)} alterada para Nível ${lvl}.`
+      fb = `✅ Permissão de ${resolveUser(targetJid, sc.selectedGroupJid)} alterada para Nível ${lvl}.`
     }
     state.customerStates[jid].flow = 'menu_group_dashboard'
     await safeSendMessage(sock, jid, { text: await renderGroupDashboard(sock, sc.selectedGroupJid, fb) })
@@ -1404,9 +1416,8 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     // ─── !fadm / !fechar ───
     if (cmd === '!fadm' || cmd === '!fechar') {
       if (!admin && !isBotOwner) return true
-      if (!sock) { await safeSendMessage(sock, groupJid, { text: '⚠️ Fechar grupo não disponível em modo Evolution.' }); return true }
       try {
-        await sock.groupSettingUpdate(groupJid, 'announcement')
+        await safeUpdateGroupSetting(sock, groupJid, 'announcement')
         await safeSendMessage(sock, groupJid, { text: '🔒 Grupo fechado. Apenas administradores podem enviar mensagens.' })
       } catch {
         await safeSendMessage(sock, groupJid, { text: '❌ Erro: Certifique-se de que o bot é admin.' })
@@ -1417,9 +1428,8 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     // ─── !abrir ───
     if (cmd === '!abrir') {
       if (!admin && !isBotOwner) return true
-      if (!sock) { await safeSendMessage(sock, groupJid, { text: '⚠️ Abrir grupo não disponível em modo Evolution.' }); return true }
       try {
-        await sock.groupSettingUpdate(groupJid, 'not_announcement')
+        await safeUpdateGroupSetting(sock, groupJid, 'not_announcement')
         await safeSendMessage(sock, groupJid, { text: '🔓 Grupo aberto para todos os membros.' })
       } catch {
         await safeSendMessage(sock, groupJid, { text: '❌ Erro: Certifique-se de que o bot é admin.' })
@@ -1578,6 +1588,9 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     const levelNames = { 0: 'Membro', 1: 'VIP', 2: 'Mod', 3: 'Dono' }
     for (const jid of mentioned) {
       setPermLevel(jid, groupJid, level)
+      if (level >= 1) {
+        await safePromote(sock, groupJid, jid)
+      }
       const num = jidToNumber(jid)
       await safeSendMessage(sock, groupJid, {
         text: `👑 @${num} foi promovido a *${levelNames[level]}* (nível ${level})`,
@@ -1598,7 +1611,8 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     const mentioned = mentionedRaw.map(j => getBaseJid(j))
     for (const jid of mentioned) {
       setPermLevel(jid, groupJid, 0)
-      await safeSendMessage(sock, groupJid, { text: `📉 @${jidToNumber(jid)} voltou ao nível 0 (Membro)`, mentions: [jid] })
+      await safeDemote(sock, groupJid, jid)
+      await safeSendMessage(sock, groupJid, { text: `📉 ${resolveUser(jid, groupJid)} voltou ao nível 0 (Membro)`, mentions: [jid] })
     }
     return true
   }
@@ -1625,8 +1639,8 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
 
     if (!filteredVips.length) { await safeSendMessage(sock, groupJid, { text: 'Nenhum membro com permissão elevada.' }); return true }
     
-    // Usa @ para o WhatsApp renderizar o nome do contato automaticamente
-    const lines = filteredVips.map(u => `*${levels[u.perm_level] || '?'}* — @${jidToNumber(u.user_id)}`).join('\n')
+    // Usa o resolveUser para exibir nomes formatados em vez de números brutos sempre que possível
+    const lines = filteredVips.map(u => `*${levels[u.perm_level] || '?'}* — ${resolveUser(u.user_id, groupJid)}`).join('\n')
     const mentions = filteredVips.map(u => getBaseJid(u.user_id))
 
     await safeSendMessage(sock, groupJid, { text: `👑 *Hierarquia do Grupo*\n\n${lines}`, mentions })
@@ -1641,7 +1655,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     await safeSendMessage(sock, groupJid, {
       text:
         `📊 *Seu Rank*\n\n` +
-        `👤 @${jidToNumber(userJid)}\n` +
+        `👤 ${resolveUser(userJid, groupJid)}\n` +
         `⭐ XP: ${data.xp}\n` +
         `📈 Nível: ${data.level}\n` +
         `🎖️ Cargo: ${levels[data.perm_level] || 'Membro'}\n` +
@@ -1663,7 +1677,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     
     const lines = top.map((u, i) => {
       const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`
-      return `${medal} @${jidToNumber(u.user_id)} — XP: ${u.xp} | Nível: ${u.level}`
+      return `${medal} ${resolveUser(u.user_id, groupJid)} — XP: ${u.xp} | Nível: ${u.level}`
     }).join('\n')
     
     const mentions = top.map(u => getBaseJid(u.user_id))
@@ -1805,11 +1819,14 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     const mentioned = mentionedRaw.map(j => getBaseJid(j))
     if (!mentioned.length) { await safeSendMessage(sock, groupJid, { text: 'Marque alguém. Ex: !ban @user' }); return true }
     for (const jid of mentioned) {
-      await safeRemove(sock, groupJid, jid)
-      resetStrikesDB(jid, groupJid)
-      await safeSendMessage(sock, groupJid, { text: `💀 @${jidToNumber(jid)} caiu...`, mentions: [jid] })
+      try {
+        await safeRemove(sock, groupJid, jid)
+        resetStrikesDB(jid, groupJid)
+        await safeSendMessage(sock, groupJid, { text: `💀 ${resolveUser(jid, groupJid)} caiu...`, mentions: [jid] })
+      } catch {
+        await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
+      }
     }
-    await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
     return true
   }
 
@@ -1910,7 +1927,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     const winner = people[Math.floor(Math.random() * people.length)]
     const winnerBase = getBaseJid(winner)
     await safeSendMessage(sock, groupJid, {
-      text: `🎉 *SORTEIO!*\n\n🏆 O vencedor é: @${jidToNumber(winnerBase)}!\nParabéns! 🎊`,
+      text: `🎉 *SORTEIO!*\n\n🏆 O vencedor é: ${resolveUser(winnerBase, groupJid)}!\nParabéns! 🎊`,
       mentions: [winnerBase]
     })
     await enviarReacaoMahito(sock, groupJid, 'fun').catch(() => {})
@@ -1919,8 +1936,30 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
 
   // ─── !perfil ───
   if (cmd === '!perfil') {
+    let targetJid = userJid
     const mentionedRaw = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || []
-    const targetJid = mentionedRaw.length > 0 ? getBaseJid(mentionedRaw[0]) : userJid
+    const quotedParticipantRaw = msg.message?.extendedTextMessage?.contextInfo?.participant || ''
+    
+    // Filtra o bot das menções se ele foi respondido acidentalmente
+    const botJid = sock?.user?.id ? getBaseJid(sock.user.id) : `${config.phoneNumber}@s.whatsapp.net`
+    const realMentions = mentionedRaw.filter(j => getBaseJid(j) !== botJid)
+
+    if (realMentions.length > 0) {
+      targetJid = getBaseJid(realMentions[0])
+    } else if (quotedParticipantRaw && getBaseJid(quotedParticipantRaw) !== botJid) {
+      targetJid = getBaseJid(quotedParticipantRaw)
+    } else {
+      const match = text.match(/@(\d{10,15})/)
+      if (match) targetJid = `${match[1]}@s.whatsapp.net`
+    }
+    
+    // Normalizar LIDs do usuário interceptado
+    const { lidToJid } = require('./pipeline')
+    if (targetJid.endsWith('@lid')) {
+      const mapped = lidToJid.get(targetJid)
+      if (mapped) targetJid = getBaseJid(mapped)
+    }
+
     const data = getUserData(targetJid, groupJid)
     const levels = { 0: 'Membro', 1: 'VIP', 2: 'Mod', 3: 'Dono' }
     const nextLevelXP = (data.level + 1) * XP_PER_LEVEL
@@ -1937,9 +1976,11 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     else if (targetIsAdmin) cargo = '🛡️ Admin'
     else if (data.perm_level >= 1) cargo = levels[data.perm_level]
     
+    const resolvedName = resolveUser(targetJid, groupJid)
+
     const card =
       `┌──────────────────────┐\n` +
-      `│  👤 @${jidToNumber(targetJid)}\n` +
+      `│  👤 ${resolvedName}\n` +
       `│  🎖️ Cargo: ${cargo}\n` +
       `│  ⭐ XP: ${data.xp}\n` +
       `│  📈 Nível: ${data.level}\n` +
@@ -1961,8 +2002,9 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     const targetJid = mentionedRaw.length > 0 ? getBaseJid(mentionedRaw[0]) : userJid
     const list = formatAchievementList(targetJid, groupJid)
     const count = countAchievements(targetJid, groupJid)
+    const resolvedName = resolveUser(targetJid, groupJid)
     await safeSendMessage(sock, groupJid, {
-      text: `🏆 *Conquistas de @${jidToNumber(targetJid)}* (${count}/${TOTAL_ACHIEVEMENTS})\n\n${list}`,
+      text: `🏆 *Conquistas de ${resolvedName}* (${count}/${TOTAL_ACHIEVEMENTS})\n\n${list}`,
       mentions: [targetJid]
     })
     return true
@@ -1981,9 +2023,9 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
       await safeSendMessage(sock, groupJid, { text: `✅ Nenhum membro inativo nos últimos ${days} dias.` })
       return true
     }
-    const lines = inactive.slice(0, 20).map(u => {
-      const lastDate = new Date(u.last_message_at).toLocaleDateString('pt-BR')
-      return `• @${jidToNumber(u.user_id)} — última msg: ${lastDate}`
+    const lines = inactive.map(u => {
+      const lastDate = u.last_message_at ? new Date(u.last_message_at).toLocaleDateString('pt-BR') : 'nunca'
+      return `• ${resolveUser(u.user_id, groupJid)} — última msg: ${lastDate}`
     })
     const mentions = inactive.slice(0, 20).map(u => getBaseJid(u.user_id))
     await safeSendMessage(sock, groupJid, {

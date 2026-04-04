@@ -12,6 +12,7 @@ const logger = require('./logger')
 const { safeDelete, safeRemove, sendDiscordLog } = require('./queue')
 const transport = require('./transport/whatsapp')
 const { isAdmin, getGroupName } = require('./group')
+const { resolveUser } = require('./identity')
 const { enviarReacaoMahito } = require('./reactions')
 
 const userStrikeLocks = new Map()
@@ -139,11 +140,10 @@ async function processSpamCommand(sock, groupJid, senderJid, text, isOwnerOrAdmi
 
 async function sendStrikeWarning(sock, groupJid, userJid, count, max, reason) {
   const remaining = Math.max(0, max - count)
-  const number = jidToNumber(userJid)
   const phrase = strikePhrase(reason)
 
   await transport.sendText(groupJid,
-    `⚠️ @${number}\n\n` +
+    `⚠️ ${resolveUser(userJid, groupJid)}\n\n` +
     `"${phrase}"\n\n` +
     `📌 Motivo: ${reason}\n` +
     `📊 Strikes: ${count}/${max}\n` +
@@ -248,7 +248,7 @@ async function handleModeration(sock, msg) {
            await safeRemove(sock, groupJid, userJid)
            resetStrikesDB(userJid, groupJid)
            await transport.sendText(groupJid,
-             `💀 @${userNumber} foi removido instantaneamente por SPAM.`,
+             `💀 ${resolveUser(userJid, groupJid)} foi removido instantaneamente por SPAM.`,
              { mentions: [userJid] }
            )
            userStrikeLocks.set(userJid, now)
@@ -271,7 +271,7 @@ async function handleModeration(sock, msg) {
             await safeRemove(sock, groupJid, userJid)
             resetStrikesDB(userJid, groupJid)
             await transport.sendText(groupJid,
-              `💀 @${userNumber} caiu...\n\nMotivo: spam/excesso de mensagens\nHumanos que ignoram as regras sempre acabam assim.`,
+              `💀 ${resolveUser(userJid, groupJid)} caiu...\n\nMotivo: spam/excesso de mensagens\nHumanos que ignoram as regras sempre acabam assim.`,
               { mentions: [userJid] }
             )
             await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
@@ -297,7 +297,7 @@ async function handleModeration(sock, msg) {
           : 'Você realmente achou que isso passaria despercebido?'
 
       await transport.sendText(groupJid,
-        `💀 @${userNumber} caiu...\n\nMotivo: ${instantReason.split(':')[1] || 'violação grave'}\n${banPhrase}`,
+        `💀 ${resolveUser(userJid, groupJid)} caiu...\n\nMotivo: ${instantReason.split(':')[1] || 'violação grave'}\n${banPhrase}`,
         { mentions: [userJid] }
       )
       await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
@@ -328,7 +328,7 @@ async function handleModeration(sock, msg) {
       await safeRemove(sock, groupJid, userJid)
       resetStrikesDB(userJid, groupJid)
       await transport.sendText(groupJid,
-        `💀 @${userNumber} foi removido.\n\nMotivo: Acúmulo de strikes (${reason})`,
+        `💀 ${resolveUser(userJid, groupJid)} foi removido.\n\nMotivo: Acúmulo de strikes (${reason})`,
         { mentions: [userJid] }
       )
       await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
@@ -352,7 +352,7 @@ async function handleGroupParticipantsUpdate(sock, update) {
     for (const participant of update.participants || []) {
       const baseJid = getBaseJid(participant)
       const number = jidToNumber(baseJid)
-      const text = String(groupConfig.welcome_text || '😈 Bem-vindo, @user. Tente não quebrar tão rápido.').replace('@user', `@${number}`)
+      const text = String(groupConfig.welcome_text || '😈 Bem-vindo, @user. Tente não quebrar tão rápido.').replace('@user', resolveUser(baseJid, update.id))
       await transport.sendText(update.id, text, { mentions: [baseJid] })
     }
   }
@@ -360,7 +360,7 @@ async function handleGroupParticipantsUpdate(sock, update) {
   if (update.action === 'remove' && groupConfig.leave_enabled) {
     const baseJid = getBaseJid(update.participants?.[0] || '')
     const number = jidToNumber(baseJid)
-    const text = (groupConfig.leave_text || '☹️ @user não aguentou e abandonou o Mahito.').replace('@user', `@${number}`)
+    const text = (groupConfig.leave_text || '☹️ @user não aguentou e abandonou o Mahito.').replace('@user', resolveUser(baseJid, update.id))
     await transport.sendText(update.id, text, { mentions: [baseJid] })
     await enviarReacaoMahito(sock, update.id, 'ban').catch(() => {})
   }

@@ -51,7 +51,13 @@ function requireSock(fnName) {
  */
 async function sendText(jid, text, { mentions = [] } = {}) {
   if (isEvolutionEnabled()) {
-    return evolution.sendText(jid, text)
+    const res = await evolution.sendText(jid, text, undefined, mentions)
+    if (res?.key?.id) {
+      const { state } = require('../state')
+      if (!state.mySentIds) state.mySentIds = new Set()
+      state.mySentIds.add(res.key.id)
+    }
+    return res
   }
   if (!requireSock('sendText')) return null
   const content = { text }

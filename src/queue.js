@@ -94,15 +94,83 @@ async function safeDelete(sock, groupJid, key, participant) {
 }
 
 async function safeRemove(sock, groupJid, userJid) {
+  const processEvolution = async () => {
+    logger.info('queue', `Removendo ${userJid} via Evolution API`)
+    const evolution = require('./evolution')
+    return await evolution.updateParticipant(groupJid, 'remove', [userJid])
+  }
+
   if (!sock) {
-    logger.warn('queue', `safeRemove ignorado: sock indisponível (modo Evolution) — não é possível remover ${userJid} de ${groupJid}`)
+    const success = await processEvolution()
+    if (!success) logger.warn('queue', `Falha ao remover ${userJid} no modo Evolution.`)
     return
   }
+
+  if (process.env.ENABLE_EVOLUTION === 'true') {
+     const success = await processEvolution()
+     if (success) return
+  }
+
   try {
     await enqueueWA(`remove:${groupJid}:${userJid}`, () => sock.groupParticipantsUpdate(groupJid, [userJid], 'remove'), DELAYS.remove, true)
-  } catch {
-    // Silently ignore remove failures
+  } catch {}
+}
+
+async function safePromote(sock, groupJid, userJid) {
+  const processEvolution = async () => {
+    logger.info('queue', `Promovendo ${userJid} via Evolution API`)
+    const evolution = require('./evolution')
+    return await evolution.updateParticipant(groupJid, 'promote', [userJid])
   }
+  if (!sock) {
+    await processEvolution()
+    return
+  }
+  if (process.env.ENABLE_EVOLUTION === 'true') {
+     const success = await processEvolution()
+     if (success) return
+  }
+  try {
+    await enqueueWA(`promote:${groupJid}:${userJid}`, () => sock.groupParticipantsUpdate(groupJid, [userJid], 'promote'), 1500, true)
+  } catch {}
+}
+
+async function safeDemote(sock, groupJid, userJid) {
+  const processEvolution = async () => {
+    logger.info('queue', `Rebaixando ${userJid} via Evolution API`)
+    const evolution = require('./evolution')
+    return await evolution.updateParticipant(groupJid, 'demote', [userJid])
+  }
+  if (!sock) {
+    await processEvolution()
+    return
+  }
+  if (process.env.ENABLE_EVOLUTION === 'true') {
+     const success = await processEvolution()
+     if (success) return
+  }
+  try {
+    await enqueueWA(`demote:${groupJid}:${userJid}`, () => sock.groupParticipantsUpdate(groupJid, [userJid], 'demote'), 1500, true)
+  } catch {}
+}
+
+async function safeUpdateGroupSetting(sock, groupJid, action) {
+  const processEvolution = async () => {
+    logger.info('queue', `Group Setting ${action} via Evolution API`)
+    const evolution = require('./evolution')
+    return await evolution.updateGroupSetting(groupJid, action)
+  }
+  if (!sock) {
+    await processEvolution()
+    return
+  }
+  if (process.env.ENABLE_EVOLUTION === 'true') {
+     const success = await processEvolution()
+     if (success) return
+  }
+  try {
+    await enqueueWA(`settings:${groupJid}`, () => sock.groupSettingUpdate(groupJid, action), 2000, true)
+  } catch {}
 }
 
 let discordDisabled = false
@@ -123,5 +191,8 @@ module.exports = {
   safeSendMessage,
   safeDelete,
   safeRemove,
+  safePromote,
+  safeDemote,
+  safeUpdateGroupSetting,
   sendDiscordLog
 }

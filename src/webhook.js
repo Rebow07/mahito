@@ -26,7 +26,8 @@ function normalizeEvolutionEvent(payload) {
     event:     payload.event     || 'unknown',
     instance:  payload.instance  || '',
     timestamp: payload.date_time || new Date().toISOString(),
-    data:      payload.data      || {}
+    data:      payload.data      || {},
+    sender:    payload.sender    || payload.owner || ''
   }
 }
 
@@ -56,6 +57,7 @@ function extractIncomingMessage(payload) {
     pushName:    data.pushName               || '',
     text:        String(text),
     messageType: data.messageType            || 'unknown',
+    contextInfo: message.extendedTextMessage?.contextInfo || message.imageMessage?.contextInfo || message.videoMessage?.contextInfo || null,
     raw: data
   }
 }
@@ -82,9 +84,15 @@ function buildPipelineMessage(extracted) {
       id:         extracted.messageId,
       participant: extracted.participant || undefined
     },
-    // Reconstuir campo message mínimo que getText() sabe ler
+    // Reconstuir campo message mínimo que getText() e pipeline entendam
     message: extracted.text
-      ? { conversation: extracted.text }
+      ? {
+          conversation: extracted.text,
+          extendedTextMessage: extracted.contextInfo ? {
+            text: extracted.text,
+            contextInfo: extracted.contextInfo
+          } : undefined
+        }
       : null,
     messageTimestamp: Math.floor(Date.now() / 1000),
     pushName: extracted.pushName || '',
@@ -145,6 +153,15 @@ async function handleWebhookRequest(req, res, sock) {
 
   const evt = normalizeEvolutionEvent(payload)
   logger.info('webhook', `evento=${evt.event} instância=${evt.instance}`)
+
+  // Descoberta dinâmica do ID do bot a partir do webhook host (Evolution envia sender/owner nas envs ou root message)
+  if (evt.sender) {
+    const { state } = require('./state')
+    const { getBaseJid } = require('./utils')
+    const parsedSender = getBaseJid(evt.sender)
+    if (parsedSender.endsWith('@lid')) state.botLidJid = parsedSender
+    else state.botJid = parsedSender
+  }
 
   if (evt.event === 'messages.upsert') {
     const extracted = extractIncomingMessage(payload)

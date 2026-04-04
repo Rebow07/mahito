@@ -7,10 +7,18 @@ async function getGroupMeta(sock, groupJid, forceRefresh = false) {
   const ttl = 5 * 60 * 1000
   const cached = state.groupMetaCache.get(groupJid)
 
-  // Modo Evolution (sock=null): retorna cache se disponível
+  // Modo Evolution (sock=null): retorna cache ou busca da API
   if (!sock) {
     if (cached?.data) return cached.data
-    logger.info('group', `getGroupMeta: sock indisponível (modo Evolution) e sem cache para ${groupJid}`)
+    const evolution = require('./evolution')
+    try {
+      logger.debug('group', `Buscando metadata Evolution para ${groupJid}...`)
+      const meta = await evolution.fetchGroupMeta(groupJid)
+      if (meta) {
+        state.groupMetaCache.set(groupJid, { data: meta, timestamp: now })
+        return meta
+      }
+    } catch { /* erro logado no modulo evolution */ }
     return null
   }
 

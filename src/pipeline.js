@@ -111,7 +111,13 @@ async function processIncomingMessage(msg, sock, evType) {
     }
   }
 
-  if (msg.key.fromMe) return
+  if (msg.key.fromMe) {
+    const meP = msg.key.participant || msg.participant
+    if (meP && meP.endsWith('@lid')) {
+      state.botLidJid = getBaseJid(meP)
+    }
+    return
+  }
 
   // Cache de mensagens de grupo
   if (remoteJid && text) {
@@ -169,7 +175,7 @@ async function processIncomingMessage(msg, sock, evType) {
 
   // Activity Tracking
   try {
-    trackUserActivity(senderJid, remoteJid)
+    trackUserActivity(senderJid, remoteJid, msg.pushName)
     incrementWeeklyStat(remoteJid, 'total_messages')
   } catch (trackErr) {
     logger.error('pipeline', `Activity tracking: ${trackErr.message}`)
@@ -341,18 +347,38 @@ async function processIncomingMessage(msg, sock, evType) {
       const { getPersona } = require('./db')
       const persona = getPersona(groupConfig.persona_id)
       if (persona && persona.ai_reply_enabled) {
-        const botNumber = currentConfig.phoneNumber
-        const botJid = `${botNumber}@s.whatsapp.net`
-        const botLidJid = sock?.user?.lid ? getBaseJid(sock.user.lid) : null
+        const botJid = state.botJid || `${currentConfig.phoneNumber}@s.whatsapp.net`
+        const botNumber = jidToNumber(botJid)
+        const botLidJid = sock?.user?.lid ? getBaseJid(sock.user.lid) : (state.botLidJid || null)
         const botLidNumber = botLidJid ? jidToNumber(botLidJid) : null
 
-        const mentioned = text.includes(`@${botNumber}`) || (botLidNumber && text.includes(`@${botLidNumber}`))
-        const quotedParticipant = msg.message?.extendedTextMessage?.contextInfo?.participant
-        const quotedBot = quotedParticipant && (
-          quotedParticipant === botJid ||
-          (botLidJid && quotedParticipant === botLidJid) ||
-          (sock?.user?.id && getBaseJid(quotedParticipant) === getBaseJid(sock.user.id))
-        )
+        const ctxInfo = msg.message?.extendedTextMessage?.contextInfo || msg.message?.imageMessage?.contextInfo || msg.message?.videoMessage?.contextInfo || {}
+
+        // 1. Checa array de menções (mencionou o botJid ou botLidJid)
+        const mentionedJids = ctxInfo.mentionedJid || []
+        const isMentionedByJid = mentionedJids.includes(botJid) || (botLidJid && mentionedJids.includes(botLidJid))
+        // 2. Fallback: digitou explicitamente @número
+        const isMentionedByText = text.includes(`@${botNumber}`) || (botLidNumber && text.includes(`@${botLidNumber}`))
+        const mentioned = isMentionedByJid || isMentionedByText
+
+        // 3. Checa se o usuário replicou (deu quote) numa mensagem do bot
+        const quotedParticipantRaw = ctxInfo.participant
+        const quotedParticipant = quotedParticipantRaw ? getBaseJid(quotedParticipantRaw) : null
+        
+        let quotedBot = false
+        if (ctxInfo.stanzaId && state.mySentIds && state.mySentIds.has(ctxInfo.stanzaId)) {
+          quotedBot = true
+          // Se eu fui respondido, aprendo meu próprio LID do participant reportado
+          if (quotedParticipant && quotedParticipant.endsWith('@lid')) {
+            state.botLidJid = quotedParticipant
+          }
+        } else if (quotedParticipant) {
+          quotedBot = (
+            quotedParticipant === botJid ||
+            (botLidJid && quotedParticipant === botLidJid) ||
+            (sock?.user?.id && quotedParticipant === getBaseJid(sock.user.id))
+          )
+        }
 
         if (persona.ai_always_on || mentioned || quotedBot) {
           const { generateResponse } = require('./ai/persona-engine')
