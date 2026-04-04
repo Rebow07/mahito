@@ -283,7 +283,8 @@ function initTables() {
     'ALTER TABLE users_data ADD COLUMN total_messages INTEGER DEFAULT 0',
     "ALTER TABLE groups_config ADD COLUMN persona_id TEXT DEFAULT 'mahito-padrao'",
     'ALTER TABLE users_data ADD COLUMN last_xp_at TEXT',
-    'ALTER TABLE users_data ADD COLUMN push_name TEXT'
+    'ALTER TABLE users_data ADD COLUMN push_name TEXT',
+    'CREATE TABLE IF NOT EXISTS secondary_owners (id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL UNIQUE, added_at INTEGER NOT NULL)'
   ]
   for (const sql of migrations) {
     try { d.exec(sql) } catch {}
@@ -770,7 +771,11 @@ module.exports = {
   addBotNumber,
   getBotConfig,
   setBotConfig,
-  getOwnerReminders
+  getOwnerReminders,
+  addSecondaryOwner,
+  removeSecondaryOwner,
+  getSecondaryOwners,
+  isSecondaryOwner
 }
 
 // ─── AI Persona & Token Usage ───
@@ -857,4 +862,30 @@ function setBotConfig(key, value) {
 function getOwnerReminders(userJid) {
   const d = getDB()
   return d.prepare('SELECT * FROM reminders WHERE user_jid = ? AND active = 1 ORDER BY datetime_alvo').all(userJid)
+}
+
+// ─── Secondary Owners ───
+
+function addSecondaryOwner(number) {
+  const d = getDB()
+  const num = String(number).replace(/\D/g, '')
+  d.prepare('INSERT OR IGNORE INTO secondary_owners (number, added_at) VALUES (?, ?)').run(num, Date.now())
+}
+
+function removeSecondaryOwner(number) {
+  const d = getDB()
+  const num = String(number).replace(/\D/g, '')
+  d.prepare('DELETE FROM secondary_owners WHERE number = ?').run(num)
+}
+
+function getSecondaryOwners() {
+  const d = getDB()
+  return d.prepare('SELECT number FROM secondary_owners').all().map(r => r.number)
+}
+
+function isSecondaryOwner(number) {
+  const d = getDB()
+  const num = String(number).replace(/\D/g, '')
+  const row = d.prepare('SELECT 1 FROM secondary_owners WHERE number = ?').get(num)
+  return !!row
 }

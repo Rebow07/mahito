@@ -3,6 +3,7 @@ require('dotenv').config({ path: path.join(__dirname, '../.env') })
 const { PATHS } = require('./state')
 const { loadJson, saveJson } = require('./database')
 const { onlyDigits, jidToNumber } = require('./utils')
+const logger = require('./logger')
 
 function loadConfig() {
   const fallback = {
@@ -86,9 +87,40 @@ function saveConfig(config) {
   saveJson(PATHS.CONFIG_PATH, config)
 }
 
+/**
+ * Verifica se um jid é dono, em duas camadas:
+ *  - master: ownerNumbers do .env/config → nunca pode ser removido
+ *  - secondary: tabela secondary_owners no banco
+ * @returns {false | 'master' | 'secondary'}
+ */
 function isOwner(jid, config) {
-  const sender = jidToNumber(jid)
-  return config.ownerNumbers.includes(sender)
+  const rawNumber = jidToNumber(jid)
+  // Limpa para somente dígitos para comparação segura
+  const senderNum = String(rawNumber).replace(/\D/g, '')
+
+  const masterOwners = (config.ownerNumbers || []).map(n => String(n).replace(/\D/g, ''))
+
+  logger.info('identity', `[OwnerCheck] Bruto: ${jid} | Número extraído: ${senderNum} | Masters config: [${masterOwners.join(', ')}]`)
+
+  // Camada 1: master owner (config/.env)
+  if (masterOwners.includes(senderNum)) {
+    logger.info('identity', `[OwnerCheck] Nível: master | Número ${senderNum} encontrado no config.`)
+    return 'master'
+  }
+
+  // Camada 2: secondary owners (banco)
+  try {
+    const { isSecondaryOwner } = require('./db')
+    if (isSecondaryOwner(senderNum)) {
+      logger.info('identity', `[OwnerCheck] Nível: secondary | Número ${senderNum} encontrado no banco.`)
+      return 'secondary'
+    }
+  } catch (err) {
+    logger.error('identity', `[OwnerCheck] Erro ao checar banco: ${err.message}`)
+  }
+
+  logger.info('identity', `[OwnerCheck] Nível: none | ${senderNum} não é owner.`)
+  return false
 }
 
 module.exports = {

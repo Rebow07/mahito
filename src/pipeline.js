@@ -141,7 +141,7 @@ async function processIncomingMessage(msg, sock, evType) {
   // ─── Mensagens Privadas ───────────────────────────────────────────────────
   if (!remoteJid.endsWith('@g.us')) {
     try {
-      if (isOwner(senderJid, currentConfig)) {
+      if (isOwner(senderJid, currentConfig)) {  // aceita 'master' ou 'secondary'
         const { handlePersonalCommand } = require('./personal')
         if (await handlePersonalCommand(text, senderJid)) return
 
@@ -236,7 +236,7 @@ async function processIncomingMessage(msg, sock, evType) {
       if (groupConfig && groupConfig.slow_mode_seconds > 0) {
         const permLevel = getPermLevel(senderJid, remoteJid)
         const admin = await isAdmin(sock, remoteJid, senderJid)
-        if (permLevel === 0 && !admin && !isOwner(senderJid, currentConfig)) {
+        if (permLevel === 0 && !admin && !isOwner(senderJid, currentConfig)) {  // isOwner retorna 'master'/'secondary'/false
           const key = `slow:${senderJid}:${remoteJid}`
           const lastSent = state.slowModeTracker?.get(key) || 0
           const now = Date.now()
@@ -314,7 +314,8 @@ async function processIncomingMessage(msg, sock, evType) {
     } catch(err) {
       logger.error('pipeline', `Falha ao checkar isAdmin: ${err.message}`)
     }
-    const isBotOwner = isOwner(senderJid, currentConfig)
+    const isBotOwner = !!isOwner(senderJid, currentConfig)  // converte 'master'/'secondary' para boolean
+    logger.info('identity', `[OwnerCheck Pipeline] Executor: ${senderJid} | isBotOwner: ${isBotOwner}`)
 
     if (isBotOwner || admin) {
       const { processXpCommand } = require('./xp')

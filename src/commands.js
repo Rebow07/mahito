@@ -15,7 +15,8 @@ const {
   getBlacklist, addBlacklistItem, removeBlacklistItem,
   getSchedules, addSchedule, removeSchedule,
   XP_PER_LEVEL, getAutoReplies, addAutoReply, removeAutoReply,
-  getUserAchievements, countAchievements, getInactiveMembers, trackUserActivity
+  getUserAchievements, countAchievements, getInactiveMembers, trackUserActivity,
+  addSecondaryOwner, removeSecondaryOwner, getSecondaryOwners
 } = require('./db')
 const { normalize, onlyDigits, jidToNumber, getBaseJid, extractUrls, sleep, getText } = require('./utils')
 const logger = require('./logger')
@@ -375,7 +376,7 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
 
     if (msg === '1') {
       state.customerStates[jid].flow = 'menu_users'
-      await safeSendMessage(sock, jid, { text: `*Controle de Usuários*\n\n1️⃣ Adicionar Whitelist\n2️⃣ Remover Whitelist\n0️⃣ Voltar` })
+      await safeSendMessage(sock, jid, { text: `*Controle de Usuários*\n\n1️⃣ Add Whitelist\n2️⃣ Rm Whitelist\n3️⃣ Gerenciar Donos Secundários\n0️⃣ Voltar` })
       return
     }
     if (msg === '2') {
@@ -438,7 +439,44 @@ async function processOwnerPrivate(sock, jid, text, msgObj) {
       await safeSendMessage(sock, jid, { text: '💬 Digite o número (Ex: 5511999999999):' })
       return
     }
+    if (msg === '3') {
+      state.customerStates[jid].flow = 'menu_owners'
+      const secondary = getSecondaryOwners()
+      const list = secondary.length ? secondary.map((n, i) => `${i + 1}. ${n}`).join('\n') : 'Nenhum dono secundário.'
+      await safeSendMessage(sock, jid, { text: `👑 *Donos Secundários*\n\n${list}\n\n1️⃣ Adicionar\n2️⃣ Remover\n0️⃣ Voltar` })
+      return
+    }
     if (msg === '0') { state.customerStates[jid].flow = 'owner_menu'; await safeSendMessage(sock, jid, { text: ownerPrivateMenu() }); return }
+  }
+
+  if (sc.flow === 'menu_owners') {
+    if (msg === '1') {
+      state.customerStates[jid].action = 'owner_add'
+      state.customerStates[jid].flow = 'awaiting_owner_number'
+      await safeSendMessage(sock, jid, { text: '💬 Número do novo dono (Ex: 5517988400805):' })
+      return
+    }
+    if (msg === '2') {
+      state.customerStates[jid].action = 'owner_rm'
+      state.customerStates[jid].flow = 'awaiting_owner_number'
+      await safeSendMessage(sock, jid, { text: '💬 Número do dono a remover:' })
+      return
+    }
+    if (msg === '0') {
+      state.customerStates[jid].flow = 'menu_users'
+      await safeSendMessage(sock, jid, { text: `*Controle de Usuários*\n\n1️⃣ Add Whitelist\n2️⃣ Rm Whitelist\n3️⃣ Gerenciar Donos Secundários\n0️⃣ Voltar` })
+      return
+    }
+  }
+
+  if (sc.flow === 'awaiting_owner_number') {
+    const out = onlyDigits(msg)
+    if (!out || out.length < 8) { await safeSendMessage(sock, jid, { text: '❌ Número inválido.' }); return }
+    if (sc.action === 'owner_add') { addSecondaryOwner(out); await safeSendMessage(sock, jid, { text: `✅ ${out} cadastrado como dono secundário.` }) }
+    if (sc.action === 'owner_rm') { removeSecondaryOwner(out); await safeSendMessage(sock, jid, { text: `✅ ${out} removido dos donos secundários.` }) }
+    state.customerStates[jid].flow = 'menu_users'
+    await safeSendMessage(sock, jid, { text: `*Controle de Usuários*\n\n1️⃣ Add Whitelist\n2️⃣ Rm Whitelist\n3️⃣ Gerenciar Donos Secundários\n0️⃣ Voltar` })
+    return
   }
 
   if (sc.flow === 'awaiting_number') {
@@ -1825,6 +1863,54 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
       await safeSendMessage(sock, groupJid, { text: `✅ Mensagem despachada pro privado do alvo!` })
     } catch {
       await safeSendMessage(sock, groupJid, { text: `❌ Não foi possível chamar a pessoa no privado.` })
+    }
+    return true
+  }
+
+  // ─── !addowner / !delowner / !owners ───
+  if (cmd === '!addowner' || cmd === '!delowner' || cmd === '!owners') {
+    const { isOwner: checkOwner } = require('./config')
+    if (!checkOwner(userJid, config)) {
+      await safeSendMessage(sock, groupJid, { text: '❌ Apenas o dono master pode gerenciar donos.' })
+      return true
+    }
+
+    if (cmd === '!owners') {
+      const list = getSecondaryOwners()
+      const text = list.length
+        ? `👑 *Donos Secundários:*\n${list.map((n, i) => `${i + 1}. ${n}`).join('\n')}`
+        : '👑 Nenhum dono secundário cadastrado.'
+      await safeSendMessage(sock, groupJid, { text })
+      return true
+    }
+
+    // Resolve o alvo: menção, reply ou número digitado
+    const mentionedRaw = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || []
+    const quotedParticipant = msg.message?.extendedTextMessage?.contextInfo?.participant || ''
+    let targetNumber = ''
+
+    if (mentionedRaw.length > 0) {
+      targetNumber = jidToNumber(getBaseJid(mentionedRaw[0]))
+    } else if (quotedParticipant) {
+      targetNumber = jidToNumber(getBaseJid(quotedParticipant))
+    } else {
+      const rawArg = parts.slice(1).join('').trim()
+      targetNumber = rawArg.replace(/\D/g, '')
+    }
+
+    if (!targetNumber || targetNumber.length < 8) {
+      await safeSendMessage(sock, groupJid, { text: '❌ Nenhum alvo identificado. Use !addowner @alvo ou !addowner 5517...' })
+      return true
+    }
+
+    if (cmd === '!addowner') {
+      addSecondaryOwner(targetNumber)
+      logger.info('identity', `[OwnerMgmt] Dono secundário adicionado: ${targetNumber} por ${userJid}`)
+      await safeSendMessage(sock, groupJid, { text: `✅ ${targetNumber} agora é dono secundário.` })
+    } else {
+      removeSecondaryOwner(targetNumber)
+      logger.info('identity', `[OwnerMgmt] Dono secundário removido: ${targetNumber} por ${userJid}`)
+      await safeSendMessage(sock, groupJid, { text: `✅ ${targetNumber} removido dos donos secundários.` })
     }
     return true
   }
