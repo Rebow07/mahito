@@ -79,16 +79,19 @@ async function processIncomingMessage(msg, sock, evType) {
   const messageType = msg.message ? Object.keys(msg.message)[0] : 'no-message'
 
   // Normalizar @lid → número real
+  const originalSenderJid = senderJid
   if (senderJid && senderJid.endsWith('@lid')) {
     const mapped = lidToJid.get(senderJid)
     if (mapped) {
       senderJid = getBaseJid(mapped)
-      logger.info('pipeline', `💡 Resolvido @lid para ${senderJid}`)
+      logger.info('identity', `[Resolver] Sender @lid convertido: ${originalSenderJid} ➔ ${senderJid}`)
+    } else {
+      logger.warn('identity', `[Resolver] Falha ao converter @lid: ${originalSenderJid}`)
     }
   }
 
   logger.info('pipeline', 'Mensagem recebida: ' + JSON.stringify({
-    jid: remoteJid, type: messageType, from: senderJid,
+    jid: remoteJid, type: messageType, fromRaw: originalSenderJid, fromResolved: senderJid,
     isFromMe: !!msg.key?.fromMe, evType, botReady: state.botReady
   }))
 
@@ -304,7 +307,13 @@ async function processIncomingMessage(msg, sock, evType) {
 
   // ─── Group Commands ───
   try {
-    const admin = sock ? await isAdmin(sock, remoteJid, senderJid) : false
+    const { isAdmin } = require('./group')
+    let admin = false
+    try {
+      admin = await isAdmin(sock, remoteJid, senderJid)
+    } catch(err) {
+      logger.error('pipeline', `Falha ao checkar isAdmin: ${err.message}`)
+    }
     const isBotOwner = isOwner(senderJid, currentConfig)
 
     if (isBotOwner || admin) {
@@ -327,17 +336,11 @@ async function processIncomingMessage(msg, sock, evType) {
   }
 
   // ─── Moderation ───
-  if (sock) {
-    try {
-      await handleModeration(sock, msg)
-    } catch (modErr) {
-      logger.error('pipeline', `Falha na moderação: ${modErr.message}`)
-    }
-  } else {
-    if (!_moderationWarnedGroups.has(remoteJid)) {
-      logger.info('pipeline', `⚠️ Moderação de links/spam desativada para ${remoteJid}: sock indisponível (modo Evolution)`)
-      _moderationWarnedGroups.add(remoteJid)
-    }
+  try {
+    // Agora a moderação (Spam e Words) verifica o banco, então não precisa barrar sem o sock de cara
+    await handleModeration(sock, msg)
+  } catch (modErr) {
+    logger.error('pipeline', `Falha na moderação: ${modErr.message}`)
   }
 
   // ─── Persona Engine ───

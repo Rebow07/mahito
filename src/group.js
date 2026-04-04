@@ -52,9 +52,21 @@ async function getGroupName(sock, groupJid) {
 
 async function isAdmin(sock, groupJid, userJid) {
   const meta = await getGroupMeta(sock, groupJid)
-  if (!meta?.participants) return false
+  if (!meta?.participants) {
+    logger.warn('identity', `[Admin Check] Falha: Grupo ${groupJid} sem meta.participants`)
+    return false
+  }
   const baseUserJid = getBaseJid(userJid)
-  return meta.participants.some(p => getBaseJid(p.id) === baseUserJid && !!p.admin)
+  const admins = meta.participants.filter(p => !!p.admin).map(p => getBaseJid(p.id))
+  const isMatch = admins.includes(baseUserJid)
+  
+  if (isMatch) {
+    logger.info('identity', `[Admin Check] Match (Sucesso) | Alvo Resolvido: ${baseUserJid} | Encontrado na Lista de Admins do servidor.`)
+  } else {
+    logger.info('identity', `[Admin Check] Block (Recusado) | Alvo Resolvido: ${baseUserJid} | Não consta na Lista de Admins do servidor: [${admins.join(', ')}]`)
+  }
+
+  return isMatch
 }
 
 module.exports = {
