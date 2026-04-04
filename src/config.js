@@ -54,6 +54,10 @@ function loadConfig() {
   if (process.env.OWNER_NUMBERS)
     config.ownerNumbers = process.env.OWNER_NUMBERS.split(',').map(n => n.trim()).filter(Boolean)
 
+  // LIDs diretos do dono — necessário em modo Evolution onde @lid não mapeia para número
+  if (process.env.OWNER_LIDS)
+    config.ownerLids = process.env.OWNER_LIDS.split(',').map(n => n.trim().replace(/\D/g, '')).filter(Boolean)
+
   if (process.env.DISCORD_WEBHOOK_URL)
     config.discordWebhookUrl = process.env.DISCORD_WEBHOOK_URL
 
@@ -77,6 +81,7 @@ function loadConfig() {
   // ────────────────────────────────────────────────────────────────────────
 
   config.ownerNumbers = (config.ownerNumbers || []).map(onlyDigits).filter(Boolean)
+  config.ownerLids = (config.ownerLids || []).map(n => String(n).replace(/\D/g, '')).filter(Boolean)
   config.phoneNumber = onlyDigits(config.phoneNumber || fallback.phoneNumber)
   return { ...fallback, ...config }
 }
@@ -110,13 +115,23 @@ function isOwner(jid, config) {
     `masters=[${masterOwners.join(', ')}]`
   ].join(' | '))
 
-  // Camada 1: master owner (config/.env)
+  // Camada 1: master owner (config/.env) — inclui OWNER_NUMBERS e OWNER_LIDS
   // Compara qualquer alias do executor contra master owners
+  const ownerLids = (config.ownerLids || [])  // dígitos do LID configurado
   for (const alias of identity.aliases) {
+    // Compara por número
     const aliasNum = String(alias).replace(/\D/g, '').replace(/@.*$/, '')
-    if (masterOwners.includes(aliasNum)) {
-      logger.info('identity', `[OwnerCheck] Nível: master | Alias '${alias}' (num=${aliasNum}) bateu no config.`)
+    if (aliasNum.length >= 8 && masterOwners.includes(aliasNum)) {
+      logger.info('identity', `[OwnerCheck] Nível: master (por número) | Alias '${alias}' → num=${aliasNum} bateu no config.`)
       return 'master'
+    }
+    // Compara por LID (dígitos brutos do @lid)
+    if (alias.endsWith('@lid')) {
+      const lidDigits = alias.split('@')[0]
+      if (ownerLids.includes(lidDigits)) {
+        logger.info('identity', `[OwnerCheck] Nível: master (por LID configurado) | LID '${alias}' match OWNER_LIDS.`)
+        return 'master'
+      }
     }
   }
 

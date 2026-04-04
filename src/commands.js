@@ -103,6 +103,57 @@ async function sendStickerFromMessage(sock, targetJid, sourceMsg, quotedMsg) {
   }
 }
 
+// ─── Helper de extração de alvos (Evolution-safe) ──────────────────────────────────────
+
+/**
+ * Extrai a lista de alvos (JIDs) de um comando de moderação.
+ * Funciona tanto em modo Baileys quanto em modo Evolution (webhook).
+ *
+ * Fontes verificadas em ordem:
+ *  1. contextInfo.mentionedJid (marcação nativa via @)
+ *  2. contextInfo.participant  (reply/quote de mensagem)
+ *  3. Texto: @<dígitos> extraído com regex do texto bruto do comando
+ *
+ * @param {object} msg     Objeto de mensagem no formato pipeline
+ * @param {string} text    Texto da mensagem (j\u00e1 extraído)
+ * @returns {string[]}     Array de JIDs base (getBaseJid aplicado)
+ */
+function extractTargets(msg, text) {
+  const ctxInfo = msg.message?.extendedTextMessage?.contextInfo ||
+                  msg.message?.imageMessage?.contextInfo ||
+                  msg.message?.videoMessage?.contextInfo ||
+                  {}
+
+  // Fonte 1: menções nativas
+  const mentionedRaw = ctxInfo.mentionedJid || []
+  if (mentionedRaw.length > 0) {
+    return mentionedRaw.map(j => getBaseJid(j))
+  }
+
+  // Fonte 2: reply (quote)
+  if (ctxInfo.participant) {
+    return [getBaseJid(ctxInfo.participant)]
+  }
+
+  // Fonte 3: @<dígitos> no texto (modo Evolution onde mencionar não gera mentionedJid)
+  // Ex: "!ban @35291830214779" ou "!ban @5517988400805"
+  const matches = [...(text || '').matchAll(/@(\d{6,})/g)]
+  if (matches.length > 0) {
+    return matches.map(m => {
+      const digits = m[1]
+      // Verifica se parece LID (muito longo) ou número real JID
+      // LIDs tipicamente têm 15+ dígitos e não começam com código de país
+      if (digits.length >= 15) {
+        // Tratar como LID bruto
+        return `${digits}@lid`
+      }
+      return `${digits}@s.whatsapp.net`
+    })
+  }
+
+  return []
+}
+
 // ─── Owner Menu ───
 
 function ownerPrivateMenu() {
@@ -1622,14 +1673,12 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
   // ─── !promover @user nivel ───
   if (cmd === '!promover') {
     logger.info('commands', `[!] !promover acionado | Executor: ${userJid} | Grupo: ${groupJid}`)
-    const { isOwner } = require('./config')
-    if (!isOwner(userJid, config)) {
-      logger.warn('commands', `[!] !promover bloqueado | Executor não é Owner no config`)
-      await safeSendMessage(sock, groupJid, { text: '❌ Apenas o Dono (nível 3) pode promover.' })
+    if (!admin && !isBotOwner) {
+      logger.warn('commands', `[!] !promover bloqueado | Executor não é admin/owner`)
+      await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins do grupo podem promover.' })
       return true
     }
-    const mentionedRaw = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || []
-    const mentioned = mentionedRaw.map(j => getBaseJid(j))
+    const mentioned = extractTargets(msg, text)
     const level = Math.min(3, Math.max(0, Number(parts[parts.length - 1]) || 1))
     if (!mentioned.length) {
       await safeSendMessage(sock, groupJid, { text: 'Marque alguém. Ex: !promover @user 2' })
@@ -1654,14 +1703,12 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
   // ─── !rebaixar @user ───
   if (cmd === '!rebaixar') {
     logger.info('commands', `[!] !rebaixar acionado | Executor: ${userJid} | Grupo: ${groupJid}`)
-    const { isOwner } = require('./config')
-    if (!isOwner(userJid, config)) {
-      logger.warn('commands', `[!] !rebaixar bloqueado | Executor não é Owner`)
-      await safeSendMessage(sock, groupJid, { text: '❌ Apenas o Dono pode rebaixar.' })
+    if (!admin && !isBotOwner) {
+      logger.warn('commands', `[!] !rebaixar bloqueado | Executor não é admin/owner`)
+      await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins do grupo podem rebaixar.' })
       return true
     }
-    const mentionedRaw = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || []
-    const mentioned = mentionedRaw.map(j => getBaseJid(j))
+    const mentioned = extractTargets(msg, text)
     for (const jid of mentioned) {
       logger.info('commands', `[!] Processando rebaixamento | Alvo: ${jid}`)
       setPermLevel(jid, groupJid, 0)
@@ -1918,11 +1965,10 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
   // ─── !ban ───
   if (cmd === '!ban') {
     logger.info('commands', `[!] !ban acionado | Executor: ${userJid} | Grupo: ${groupJid}`)
-    const mentionedRaw = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || []
-    const mentioned = mentionedRaw.map(j => getBaseJid(j))
+    const mentioned = extractTargets(msg, text)
     if (!mentioned.length) { 
-      logger.warn('commands', `[!] !ban sem marcação`)
-      await safeSendMessage(sock, groupJid, { text: 'Marque alguém. Ex: !ban @user' }); 
+      logger.warn('commands', `[!] !ban sem alvo identificado`)
+      await safeSendMessage(sock, groupJid, { text: 'Marque alguem. Ex: !ban @user ou !ban @5517...' }); 
       return true 
     }
     for (const jid of mentioned) {
@@ -1930,7 +1976,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
         logger.info('commands', `[!] Processando banimento | Alvo: ${jid}`)
         await safeRemove(sock, groupJid, jid)
         resetStrikesDB(jid, groupJid)
-        await safeSendMessage(sock, groupJid, { text: `💀 ${resolveUser(jid, groupJid)} caiu...`, mentions: [jid] })
+        await safeSendMessage(sock, groupJid, { text: `\ud83d\udc80 ${resolveUser(jid, groupJid)} caiu...`, mentions: [jid] })
       } catch (err) {
         logger.error('commands', `[!] !ban falhou localmente | Alvo: ${jid} | Motivo: ${err.message}`)
         await enviarReacaoMahito(sock, groupJid, 'ban').catch(() => {})
@@ -1941,9 +1987,8 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
 
   // ─── !aviso ───
   if (cmd === '!aviso') {
-    const mentionedRaw = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || []
-    const mentioned = mentionedRaw.map(j => getBaseJid(j))
-    if (!mentioned.length) { await safeSendMessage(sock, groupJid, { text: 'Marque alguém.' }); return true }
+    const mentioned = extractTargets(msg, text)
+    if (!mentioned.length) { await safeSendMessage(sock, groupJid, { text: 'Marque alguem.' }); return true }
     const gc = getGroupConfig(groupJid)
     for (const jid of mentioned) {
       const count = addStrikeDB(jid, groupJid)
@@ -1955,8 +2000,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
 
   // ─── !reset ───
   if (cmd === '!reset') {
-    const mentionedRaw = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || []
-    const mentioned = mentionedRaw.map(j => getBaseJid(j))
+    const mentioned = extractTargets(msg, text)
     if (!mentioned.length) { await safeSendMessage(sock, groupJid, { text: 'Marque alguém.' }); return true }
     for (const jid of mentioned) resetStrikesDB(jid, groupJid)
     await safeSendMessage(sock, groupJid, { text: '✅ Strikes resetados.' })
@@ -2122,7 +2166,7 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
   // ─── !inativos ───
   if (cmd === '!inativos') {
     const { isOwner } = require('./config')
-    if (!isOwner(userJid, config) && !isAdminOrVIP) {
+    if (!isOwner(userJid, config) && !isPrivileged) {
       await safeSendMessage(sock, groupJid, { text: '❌ Apenas admins/donos podem usar este comando.' })
       return true
     }
