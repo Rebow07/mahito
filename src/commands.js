@@ -1809,13 +1809,18 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     const data = getUserData(userJid, groupJid)
     const levels = { 0: 'Membro', 1: 'VIP', 2: 'Mod', 3: 'Dono' }
     const nextLevelXP = (data.level + 1) * XP_PER_LEVEL
+    // Cargo auto-detectado: owner > admin > DB
+    let rankCargo = levels[data.perm_level] || 'Membro'
+    if (isBotOwner) rankCargo = '👑 Dono'
+    else if (admin) rankCargo = '🛡️ Admin'
+    else if (data.perm_level >= 1) rankCargo = levels[data.perm_level]
     await safeSendMessage(sock, groupJid, {
       text:
         `📊 *Seu Rank*\n\n` +
         `👤 ${resolveUser(userJid, groupJid)}\n` +
         `⭐ XP: ${data.xp}\n` +
         `📈 Nível: ${data.level}\n` +
-        `🎖️ Cargo: ${levels[data.perm_level] || 'Membro'}\n` +
+        `🎖️ Cargo: ${rankCargo}\n` +
         `⚡ Strikes: ${data.penalties}\n` +
         `🎯 Próximo nível: ${nextLevelXP - data.xp} XP restantes`,
       mentions: [userJid]
@@ -2187,9 +2192,12 @@ async function handleGroupCommands(sock, msg, text, groupJid, userJid, admin, is
     const lastMsg = data.last_message_at ? new Date(data.last_message_at).toLocaleDateString('pt-BR') : 'Nunca'
     
     // Auto-detect role: Owner > Admin > DB perm_level
-    const { isOwner } = require('./config')
-    const targetIsOwner = isOwner(mentionJid, config)
-    const targetIsAdmin = await isAdmin(sock, groupJid, mentionJid)
+    const { isOwner: _checkOwner } = require('./config')
+    let targetIsOwner = _checkOwner(mentionJid, config)
+    // Para auto-perfil (sem alvo explícito): se o pipeline já reconheceu o executor
+    // como owner (via OWNER_LIDS ou número), confiar nessa verificação.
+    if (!targetIsOwner && targetResolution === null && isBotOwner) targetIsOwner = 'master'
+    const targetIsAdmin = targetIsOwner ? false : await isAdmin(sock, groupJid, mentionJid)
     let cargo = levels[data.perm_level] || 'Membro'
     if (targetIsOwner) cargo = '👑 Dono'
     else if (targetIsAdmin) cargo = '🛡️ Admin'

@@ -85,9 +85,21 @@ async function processIncomingMessage(msg, sock, evType) {
     const mapped = lidToJid.get(senderJid)
     if (mapped) {
       senderJid = getBaseJid(mapped)
-      logger.info('identity', `[Resolver] Sender @lid convertido: ${originalSenderJid} ➔ ${senderJid}`)
+      logger.info('identity', `[Resolver] Sender @lid convertido (lidToJid): ${originalSenderJid} ➔ ${senderJid}`)
     } else {
-      logger.warn('identity', `[Resolver] Falha ao converter @lid: ${originalSenderJid}`)
+      // Fallback: tentar via cache de identidade (populado de sessões anteriores ou do banco)
+      try {
+        const { resolveIdentity: _ri } = require('./identity')
+        const cachedId = _ri(senderJid)
+        if (cachedId.primaryJid) {
+          senderJid = cachedId.primaryJid
+          logger.info('identity', `[Resolver] Sender @lid resolvido via cache: ${originalSenderJid} ➔ ${senderJid}`)
+        } else {
+          logger.warn('identity', `[Resolver] Sender @lid sem resolução conhecida: ${originalSenderJid}`)
+        }
+      } catch {
+        logger.warn('identity', `[Resolver] Falha ao converter @lid: ${originalSenderJid}`)
+      }
     }
   }
 
